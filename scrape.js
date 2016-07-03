@@ -22,6 +22,12 @@ const ROOT_DIR = __dirname;
 const ENTRIES_COUNT_SELECTOR = '.csc-default > .tx-updsiafeuseradmin-pi1 > div.specPageBrowse.clearfix > h2 > span';
 const CURRENT_ENTRIES_SELECTOR = '.csc-default > .tx-updsiafeuseradmin-pi1 > div.specPageBrowse.clearfix > .browseBoxWrapTop > p > span';
 const MEMBERS = {};
+let PAGES_PARSED = 0;
+let PAGES_PARSE_TIMES = [];
+let MEMBERS_PARSED = 0;
+let MEMBERS_PARSE_TIMES = [];
+let TOTAL_ENTRIES = 0;
+
 
 TARGETS.forEach(target => {
     co(scrape(target));
@@ -38,10 +44,12 @@ function *scrape(target) {
     let iteration = 0;
     let next_page;
     do {
+        let time_page_parse_start = new Date();
         let html = yield *fetchPage(instance, url);
         let $ = cheerio.load(html);
         if (iteration === 0) {
             let total_entries = $(ENTRIES_COUNT_SELECTOR).text().match(/\d+'?\d+/);
+            TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
             console.log(`Number of entries: ${total_entries.toString()}`);
         }
         if ($(CURRENT_ENTRIES_SELECTOR).length) {
@@ -49,6 +57,8 @@ function *scrape(target) {
         }
         let $rows = $('.table-list-directory tr').not('.table-list-header');
         for (let i = 0; i < $rows.length; i++) {
+            let time_member_parse_start = new Date();
+            console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
             member = yield *scrapeMemberData($rows.eq(i), $, instance);
             // members.push(member);
             let file = path.join(ROOT_DIR, `${target.type}.json`);
@@ -56,21 +66,33 @@ function *scrape(target) {
                 cleanFile(file);
             }
             writeToFile(file, JSON.stringify(member));
+            let time_member_parse_end = new Date();
+            let time_member_parse = time_member_parse_end - time_member_parse_start;
+            console.log(`Member parsed in ${time_member_parse}ms\n\n`);
+            MEMBERS_PARSED++;
+            MEMBERS_PARSE_TIMES.push(time_member_parse);
         }
 
         url = ROOT_URL + $('.nextLinkWrap a').first().attr('href');
         next_page = $('.nextLinkWrap a').length > 0;
+        let time_page_parse_end = new Date();
+        let time_page_parse = time_page_parse_end - time_page_parse_start;
+        console.log(`Page parsed in ${time_page_parse}ms`);
+        PAGES_PARSED++;
+        PAGES_PARSE_TIMES.push(time_page_parse);
     } while (next_page);
 
     // MEMBERS[target.type] = members;
 
-    console.log('All member data scraped.');
-    console.log(`Fetched ${target.type} members data:`);
+    console.log(`All ${target.type} member data scraped.`);
+    // console.log(`Fetched ${target.type} members data:`);
     // console.log(stringifyObject(members));
 
     console.log('Exiting phantom instance.');
-    yield instance.exit();
-    console.log('Done!');
+    instance.exit();
+    console.log('Done!\n\n');
+    console.log('Performance analysis...');
+    console.log(formatPerformanceResults())
 }
 
 function *initPhantomInstance() {
@@ -98,7 +120,7 @@ function *scrapeMemberData($row, $, instance) {
 }
 
 function *fetchPage(instance, url) {
-    console.log('Phantom createPage');
+    console.log('\n\nPhantom createPage');
     const page = yield instance.createPage();
     console.log('Opening URL', url);
     let status = yield page.open(url);
@@ -107,6 +129,7 @@ function *fetchPage(instance, url) {
     let html = yield page.property('content');
     console.log('Closing page');
     yield page.close();
+    console.log('Page closed');
     return html;
 }
 
@@ -205,4 +228,27 @@ function cleanFile(file) {
     console.log(`Closing ${file}`);
     fs.closeSync(fd);
     console.log('Cleaning file - Done!');
+}
+
+function formatPerformanceResults() {
+    let result = '';
+    let total_page_parse_time = PAGES_PARSE_TIMES.reduce(sum, 0);
+    let avg_page_parse_time = total_page_parse_time / PAGES_PARSED;
+    result += `Nr. of pages parsed: ${PAGES_PARSED}\n`;
+    result += `Total time for parsing pages: ${total_page_parse_time}ms\n`;
+    result += `Average parse time per page: ${avg_page_parse_time}ms\n`;
+
+    result += '\n';
+
+    let total_member_parse_time = MEMBERS_PARSE_TIMES.reduce(sum, 0);
+    let avg_member_parse_time = total_page_parse_time / MEMBERS_PARSED;
+    result += `Nr. of members parsed: ${MEMBERS_PARSED}\n`;
+    result += `Total time for parsing members: ${total_member_parse_time}ms\n`;
+    result += `Average parse time per member: ${avg_member_parse_time}ms\n`;
+
+    return result;
+}
+
+function sum(a, b) {
+    return a + b;
 }
