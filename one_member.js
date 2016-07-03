@@ -1,3 +1,5 @@
+/* eslint-env node */
+
 'use strict';
 
 const phantom = require('phantom');
@@ -9,60 +11,50 @@ const stringifyObject = require('stringify-object');
 const ROOT_URL = 'http://www.sia.ch';
 const URL = 'http://www.sia.ch/en/membership/member-directory/honorary-members/';
 
-let phantom_instance;
-let phantom_page;
-let member = {};
 
-console.log('Initiate phantom');
-phantom.create()
-    .then(instance => {
-        console.log('Storing phantom instance.');
-        phantom_instance = instance;
-        console.log('Initiate phantom createPage');
-        return instance.createPage();
-    })
-    .then(page => {
-        console.log('Store created page');
-        phantom_page = page;
-        console.log('Opening URL');
-        return page.open(URL);
-    })
-    .then(status => {
-        console.log('URL opened. Status: ', status);
-        console.log('Getting page content');
-        return phantom_page.property('content');
-    })
-    .then(html => {
-        console.log('Parsing page content');
-        let $ = cheerio.load(html);
-        console.log('Parsing general member data');
-        member = parseGeneralMemberData($);
-        console.log('Get URL to member page');
-        let url = getMemberUrl($);
-        console.log('Open member page');
-        return phantom_page.open(url);
-    })
-    .then(status => {
-        console.log('URL opened. Status: ', status);
-        console.log('Getting page content');
-        return phantom_page.property('content');
-    })
-    .then(html => {
-        console.log('Parsing page content');
-        let $ = cheerio.load(html);
-        console.log('Parsing detailed member data');
-        member.details = parseDetailedMemberData($);
-        console.log('All member data scraped.');
-        console.log('Fetched member data:');
-        console.log(stringifyObject(member));
-    })
-    .then(() => {
-        console.log('Closing page');
-        phantom_page.close();
-        console.log('Exiting phantom instance.');
-        phantom_instance.exit()
-        console.log('Done!');
-    });
+co(scrape());
+
+function *scrape() {
+    let phantom_instance;
+    let phantom_page;
+    let member = {};
+
+    console.log('Initiate phantom');
+    console.log('Storing phantom instance.');
+    const instance = yield phantom.create();
+    console.log('Phantom createPage');
+    const page = yield instance.createPage();
+    console.log('Opening URL');
+    let status = yield page.open(URL);
+    console.log('URL opened. Status: ', status);
+    console.log('Getting page content');
+    let html = yield page.property('content');
+    console.log('Parsing page content');
+    let $ = cheerio.load(html);
+    console.log('Parsing general member data');
+    member = parseGeneralMemberData($);
+
+    console.log('Get URL to member page');
+    let url = getMemberUrl($);
+    console.log('Open member page');
+    status = yield page.open(url);
+    console.log('URL opened. Status: ', status);
+    console.log('Getting page content');
+    html = yield page.property('content');
+    console.log('Parsing page content');
+    $ = cheerio.load(html);
+    console.log('Parsing detailed member data');
+    member.details = parseDetailedMemberData($);
+    console.log('All member data scraped.');
+    console.log('Fetched member data:');
+    console.log(stringifyObject(member));
+
+    console.log('Closing page');
+    yield page.close();
+    console.log('Exiting phantom instance.');
+    yield instance.exit();
+    console.log('Done!');
+}
 
 
 // function parseMemberData($) {
