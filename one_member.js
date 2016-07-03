@@ -15,20 +15,30 @@ const URL = 'http://www.sia.ch/en/membership/member-directory/honorary-members/'
 co(scrape());
 
 function *scrape() {
-    let phantom_instance;
-    let phantom_page;
     let member = {};
 
+    let instance = yield *initPhantomInstance();
+    member = yield *scrapeMemberData(instance);
+
+    console.log('All member data scraped.');
+    console.log('Fetched member data:');
+    console.log(stringifyObject(member));
+
+    console.log('Exiting phantom instance.');
+    yield instance.exit();
+    console.log('Done!');
+}
+
+function *initPhantomInstance() {
     console.log('Initiate phantom');
     console.log('Storing phantom instance.');
-    const instance = yield phantom.create();
-    console.log('Phantom createPage');
-    const page = yield instance.createPage();
-    console.log('Opening URL');
-    let status = yield page.open(URL);
-    console.log('URL opened. Status: ', status);
-    console.log('Getting page content');
-    let html = yield page.property('content');
+    return yield phantom.create();
+}
+
+function *scrapeMemberData(instance) {
+    let html = yield *fetchPage(instance, URL);
+    let member = {};
+
     console.log('Parsing page content');
     let $ = cheerio.load(html);
     console.log('Parsing general member data');
@@ -36,24 +46,29 @@ function *scrape() {
 
     console.log('Get URL to member page');
     let url = getMemberUrl($);
+
     console.log('Open member page');
-    status = yield page.open(url);
-    console.log('URL opened. Status: ', status);
-    console.log('Getting page content');
-    html = yield page.property('content');
+    html = yield *fetchPage(instance, url);
+
     console.log('Parsing page content');
     $ = cheerio.load(html);
     console.log('Parsing detailed member data');
     member.details = parseDetailedMemberData($);
-    console.log('All member data scraped.');
-    console.log('Fetched member data:');
-    console.log(stringifyObject(member));
 
+    return member;
+}
+
+function *fetchPage(instance, url) {
+    console.log('Phantom createPage');
+    const page = yield instance.createPage();
+    console.log('Opening URL', url);
+    let status = yield page.open(url);
+    console.log('URL opened. Status: ', status);
+    console.log('Getting page content');
+    let html = yield page.property('content');
     console.log('Closing page');
     yield page.close();
-    console.log('Exiting phantom instance.');
-    yield instance.exit();
-    console.log('Done!');
+    return html;
 }
 
 
