@@ -10,6 +10,11 @@
   "license": "MIT",
   "dependencies": {
     "cheerio": "^0.20.0",
-    "request": "^2.72.0"
+    "co": "^4.6.0",
+    "phantom": "^2.1.9"
+  },
+  "devDependencies": {
+    "pretty-print": "^1.1.0",
+    "stringify-object": "^2.4.0"
   }
 }
