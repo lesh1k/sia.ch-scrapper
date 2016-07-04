@@ -92,7 +92,7 @@ function* scrapePage(url, instance, file) {
         writeToFile(file, JSON.stringify(member));
         timer('member').stop();
         timer('member').result(t => {
-            console.log(`Member parsed in ${t}ms\n\n`)
+            console.log(`Member parsed in ${t}ms\n\n`);
             MEMBERS_PARSE_TIMES.push(t);
         });
         MEMBERS_PARSED++;
@@ -103,7 +103,7 @@ function* scrapePage(url, instance, file) {
     let next_page = $('.nextLinkWrap a').length > 0;
     timer('page').stop();
     timer('page').result(t => {
-        console.log(`Page parsed in ${t}ms`)
+        console.log(`Page parsed in ${t}ms`);
         PAGES_PARSE_TIMES.push(t);
     });
     PAGES_PARSED++;
