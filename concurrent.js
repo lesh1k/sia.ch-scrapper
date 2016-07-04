@@ -29,6 +29,7 @@ let PAGES_PARSE_TIMES = [];
 let MEMBERS_PARSED = 0;
 let MEMBERS_PARSE_TIMES = [];
 let TOTAL_ENTRIES = 0;
+const timer = createTimer();
 
 
 TARGETS.forEach(target => {
@@ -38,54 +39,18 @@ TARGETS.forEach(target => {
 
 function* scrape(target) {
     console.log(`Begin scraping ${target.type} members.`);
-    // const members = [];
-    let member = {};
-
+    timer('test').start();
     let instance = yield * initPhantomInstance();
-    let url = target.url;
-    let iteration = 0;
     let next_page;
+    let url = target.url;
     let file = path.join(ROOT_DIR, `${target.type}.json`);
+
     cleanFile(file);
+    timer('test').stop();
+    console.log(timer('test').result());
     do {
-        let time_page_parse_start = new Date();
-        let html = yield * fetchPage(instance, url);
-        let $ = cheerio.load(html);
-        if (iteration === 0) {
-            let total_entries = $(ENTRIES_COUNT_SELECTOR).text().match(/\d+'?\d+/);
-            TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
-            console.log(`Number of entries: ${total_entries.toString()}`);
-        }
-        if ($(CURRENT_ENTRIES_SELECTOR).length) {
-            console.log(`Parsing entries ${$(CURRENT_ENTRIES_SELECTOR).text()}`);
-        }
-
-        console.log('\n\n');
-        let $rows = $('.table-list-directory tr').not('.table-list-header');
-        for (let i = 0; i < $rows.length; i++) {
-            let time_member_parse_start = new Date();
-            console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-            member = yield * scrapeMemberData($rows.eq(i), $, instance);
-            // members.push(member);
-            // let file = path.join(ROOT_DIR, `${target.type}.json`);
-            writeToFile(file, JSON.stringify(member));
-            let time_member_parse_end = new Date();
-            let time_member_parse = time_member_parse_end - time_member_parse_start;
-            console.log(`Member parsed in ${time_member_parse}ms\n\n`);
-            MEMBERS_PARSED++;
-            MEMBERS_PARSE_TIMES.push(time_member_parse);
-        }
-
-        url = ROOT_URL + $('.nextLinkWrap a').first().attr('href');
-        next_page = $('.nextLinkWrap a').length > 0;
-        let time_page_parse_end = new Date();
-        let time_page_parse = time_page_parse_end - time_page_parse_start;
-        console.log(`Page parsed in ${time_page_parse}ms`);
-        PAGES_PARSED++;
-        PAGES_PARSE_TIMES.push(time_page_parse);
+        next_page = yield * scrapePage(url, instance, file);
     } while (next_page);
-
-    // MEMBERS[target.type] = members;
 
     console.log(`All ${target.type} member data scraped.`);
 
@@ -93,13 +58,82 @@ function* scrape(target) {
     instance.exit();
     console.log('Done!\n\n');
     console.log('Performance analysis...');
-    console.log(formatPerformanceResults())
+    console.log(formatPerformanceResults());
 }
 
 function* initPhantomInstance() {
     console.log('Initiate phantom');
     console.log('Storing phantom instance.');
     return yield phantom.create();
+}
+
+function* scrapePage(url, instance, file) {
+    timer('page').start();
+    let html = yield * fetchPage(instance, url);
+    let $ = cheerio.load(html);
+    if (PAGES_PARSED === 0) {
+        let total_entries = $(ENTRIES_COUNT_SELECTOR).text().match(/\d+'?\d+/);
+        TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
+        console.log(`Number of entries: ${total_entries.toString()}`);
+    }
+    if ($(CURRENT_ENTRIES_SELECTOR).length) {
+        console.log(`Parsing entries ${$(CURRENT_ENTRIES_SELECTOR).text()}`);
+    }
+
+    console.log('\n\n');
+    let $rows = $('.table-list-directory tr').not('.table-list-header');
+    let member;
+    for (let i = 0; i < $rows.length; i++) {
+        timer('member').start();
+        console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
+        member = yield * scrapeMemberData($rows.eq(i), $, instance);
+        // members.push(member);
+        // let file = path.join(ROOT_DIR, `${target.type}.json`);
+        writeToFile(file, JSON.stringify(member));
+        timer('member').stop();
+        timer('member').result(t => {
+            console.log(`Member parsed in ${t}ms\n\n`)
+            MEMBERS_PARSE_TIMES.push(t);
+        });
+        MEMBERS_PARSED++;
+    }
+
+
+    url = ROOT_URL + $('.nextLinkWrap a').first().attr('href');
+    let next_page = $('.nextLinkWrap a').length > 0;
+    timer('page').stop();
+    timer('page').result(t => {
+        console.log(`Page parsed in ${t}ms`)
+        PAGES_PARSE_TIMES.push(t);
+    });
+    PAGES_PARSED++;
+    return next_page;
+}
+
+function createTimer() {
+    const timers = {};
+    return function(name) {
+        if (!timers[name]) {
+            timers[name] = {
+                start: function() {
+                    this._start = new Date();
+                },
+                stop: function() {
+                    this._end = new Date();
+                },
+                result: function(cb) {
+                    let time = this._end - this._start;
+                    if (typeof cb === 'function') {
+                        return cb(time);
+                    }
+
+                    return `Execution time for "${name}": ${time}ms`;
+                }
+            };
+        }
+
+        return timers[name];
+    };
 }
 
 function* scrapeMemberData($row, $, instance) {
