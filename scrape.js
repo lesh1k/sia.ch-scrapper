@@ -11,8 +11,10 @@ const path = require('path');
 
 const ROOT_URL = 'http://www.sia.ch';
 // const URL = 'http://www.sia.ch/en/membership/member-directory/honorary-members/';
-const TARGETS = [
-    { type: 'honorary', url: 'http://www.sia.ch/en/membership/member-directory/honorary-members/'},
+const TARGETS = [{
+        type: 'honorary',
+        url: 'http://www.sia.ch/en/membership/member-directory/honorary-members/'
+    },
     // { type: 'individual', url: 'http://www.sia.ch/en/membership/member-directory/individual-members/'},
     // { type: 'corporate', url: 'http://www.sia.ch/en/membership/member-directory/corporate-members/'},
     // { type: 'student', url: 'http://www.sia.ch/en/membership/member-directory/student-members/'}
@@ -34,18 +36,20 @@ TARGETS.forEach(target => {
 });
 
 
-function *scrape(target) {
+function* scrape(target) {
     console.log(`Begin scraping ${target.type} members.`);
     // const members = [];
     let member = {};
 
-    let instance = yield *initPhantomInstance();
+    let instance = yield * initPhantomInstance();
     let url = target.url;
     let iteration = 0;
     let next_page;
+    let file = path.join(ROOT_DIR, `${target.type}.json`);
+    cleanFile(file);
     do {
         let time_page_parse_start = new Date();
-        let html = yield *fetchPage(instance, url);
+        let html = yield * fetchPage(instance, url);
         let $ = cheerio.load(html);
         if (iteration === 0) {
             let total_entries = $(ENTRIES_COUNT_SELECTOR).text().match(/\d+'?\d+/);
@@ -55,16 +59,15 @@ function *scrape(target) {
         if ($(CURRENT_ENTRIES_SELECTOR).length) {
             console.log(`Parsing entries ${$(CURRENT_ENTRIES_SELECTOR).text()}`);
         }
+
+        console.log('\n\n');
         let $rows = $('.table-list-directory tr').not('.table-list-header');
         for (let i = 0; i < $rows.length; i++) {
             let time_member_parse_start = new Date();
             console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-            member = yield *scrapeMemberData($rows.eq(i), $, instance);
+            member = yield * scrapeMemberData($rows.eq(i), $, instance);
             // members.push(member);
-            let file = path.join(ROOT_DIR, `${target.type}.json`);
-            if (i === 0) {
-                cleanFile(file);
-            }
+            // let file = path.join(ROOT_DIR, `${target.type}.json`);
             writeToFile(file, JSON.stringify(member));
             let time_member_parse_end = new Date();
             let time_member_parse = time_member_parse_end - time_member_parse_start;
@@ -85,8 +88,6 @@ function *scrape(target) {
     // MEMBERS[target.type] = members;
 
     console.log(`All ${target.type} member data scraped.`);
-    // console.log(`Fetched ${target.type} members data:`);
-    // console.log(stringifyObject(members));
 
     console.log('Exiting phantom instance.');
     instance.exit();
@@ -95,13 +96,13 @@ function *scrape(target) {
     console.log(formatPerformanceResults())
 }
 
-function *initPhantomInstance() {
+function* initPhantomInstance() {
     console.log('Initiate phantom');
     console.log('Storing phantom instance.');
     return yield phantom.create();
 }
 
-function *scrapeMemberData($row, $, instance) {
+function* scrapeMemberData($row, $, instance) {
     let member = {};
 
     const keys = parseColumnNames($);
@@ -112,16 +113,19 @@ function *scrapeMemberData($row, $, instance) {
     let url = getMemberUrl($row);
 
     console.log('Open member page');
-    let html = yield *fetchPage(instance, url);
+    let html = yield * fetchPage(instance, url);
     console.log('Parsing detailed member data');
     member.details = parseDetailedMemberData(html);
 
     return member;
 }
 
-function *fetchPage(instance, url) {
-    console.log('\n\nPhantom createPage');
+function* fetchPage(instance, url) {
+    console.log('Phantom createPage');
     const page = yield instance.createPage();
+    console.log('Setup selective resource blocking');
+    yield* blockResourceLoading(page);
+
     console.log('Opening URL', url);
     let status = yield page.open(url);
     console.log('URL opened. Status: ', status);
@@ -251,4 +255,18 @@ function formatPerformanceResults() {
 
 function sum(a, b) {
     return a + b;
+}
+
+function *blockResourceLoading(page) {
+    yield page.property('onResourceRequested', function(requestData, request) {
+        var BLOCKED_RESOURCES = [
+            /\.gif/gi,
+            /\.png/gi,
+            /\.css/gi
+        ];
+        if (BLOCKED_RESOURCES.some(function(r) {return r.test(requestData['url']); })) {
+            // console.log('BLOCKED: ', requestData['url']);
+            request.abort();
+        }
+    });
 }
