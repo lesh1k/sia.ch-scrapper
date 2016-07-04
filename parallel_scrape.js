@@ -124,7 +124,7 @@ function* fetchPage(instance, url) {
     console.log('Phantom createPage');
     const page = yield instance.createPage();
     console.log('Setup selective resource blocking');
-    yield* blockResourceLoading(page);
+    yield * blockResourceLoading(page);
 
     console.log('Opening URL', url);
     let status = yield page.open(url);
@@ -257,14 +257,16 @@ function sum(a, b) {
     return a + b;
 }
 
-function *blockResourceLoading(page) {
+function* blockResourceLoading(page) {
     yield page.property('onResourceRequested', function(requestData, request) {
         var BLOCKED_RESOURCES = [
             /\.gif/gi,
             /\.png/gi,
             /\.css/gi
         ];
-        if (BLOCKED_RESOURCES.some(function(r) {return r.test(requestData['url']); })) {
+        if (BLOCKED_RESOURCES.some(function(r) {
+                return r.test(requestData['url']);
+            })) {
             // console.log('BLOCKED: ', requestData['url']);
             request.abort();
         }
