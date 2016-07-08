@@ -71,7 +71,14 @@ function* scrapePage(url, member_type) {
     }
 
     console.log('\n\n');
-    yield * scrapeMembers($, member_type);
+    const keys = parseColumnNames($);
+    let $rows = $('.table-list-directory tr').not('.table-list-header');
+
+    // DEBUG ONLY
+    $rows = $rows.slice(0, 3);
+    // EOF DEBUG ONLY
+
+    yield * scrapeMembers($rows, keys, member_type);
 
     let next_page = $('.nextLinkWrap a').length > 0;
     if (next_page) {
@@ -90,13 +97,12 @@ function* scrapePage(url, member_type) {
     return url;
 }
 
-function* scrapeMembers($, member_type) {
+function* scrapeMembers($rows, keys, member_type) {
     let file = path.join(ROOT_DIR, `${member_type}_members.json`);
-    let $rows = $('.table-list-directory tr').not('.table-list-header').slice(0, 3);
     for (let i = 0; i < $rows.length; i++) {
         timer(`MEMBER[${MEMBERS_PARSED}]`).start();
         console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-        let member = yield * scrapeMemberData($rows.eq(i), $);
+        let member = yield * scrapeMemberData($rows.eq(i), keys);
         writeToFile(file, JSON.stringify(member));
         timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
         timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
@@ -107,10 +113,9 @@ function* scrapeMembers($, member_type) {
     }
 }
 
-function* scrapeMemberData($row, $) {
+function* scrapeMemberData($row, keys) {
     let member = {};
 
-    const keys = parseColumnNames($);
     console.log('Parsing general member data');
     member = parseGeneralMemberData($row, keys);
 
