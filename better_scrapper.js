@@ -33,69 +33,23 @@ let TOTAL_ENTRIES = 0;
 
 
 TARGETS.forEach(target => {
-    co(scrape(target));
+    co(scrape(target.url, target.type));
 });
 
 
-function* scrape(target) {
-    console.log(`Begin scraping ${target.type} members.`);
-    // const members = [];
-    let member = {};
-
-    let instance = yield * initPhantomInstance();
-    let url = target.url;
-    let next_page;
-    let file = path.join(ROOT_DIR, `${target.type}_members.json`);
+function* scrape(url, member_type) {
+    console.log(`Begin scraping ${member_type} members.`);
+    let file = path.join(ROOT_DIR, `${member_type}_members.json`);
     cleanFile(file);
-    do {
-        timer(`PAGE[${PAGES_PARSED}]`).start();
-        let html = yield * fetchPage(instance, url);
-        let $ = cheerio.load(html);
-        if (PAGES_PARSED === 0) {
-            let total_entries = $(ENTRIES_COUNT_SELECTOR).text().match(/\d+'?\d+/);
-            TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
-            console.log(`Number of entries: ${total_entries.toString()}`);
-        }
-        if ($(CURRENT_ENTRIES_SELECTOR).length) {
-            console.log(`Parsing entries ${$(CURRENT_ENTRIES_SELECTOR).text()}`);
-        }
+    while (url) {
+        url = yield * scrapePage(url, member_type);
+    }
 
-        console.log('\n\n');
-        let $rows = $('.table-list-directory tr').not('.table-list-header').slice(0, 3);
-        for (let i = 0; i < $rows.length; i++) {
-            timer(`MEMBER[${MEMBERS_PARSED}]`).start();
-            console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-            member = yield * scrapeMemberData($rows.eq(i), $, instance);
-            // members.push(member);
-            // let file = path.join(ROOT_DIR, `${target.type}.json`);
-            writeToFile(file, JSON.stringify(member));
-            timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
-            timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
-                console.log(`Member parsed in ${time}ms\n\n`);
-                MEMBERS_PARSE_TIMES.push(time);
-            });
-            MEMBERS_PARSED++;
-        }
-
-        url = ROOT_URL + $('.nextLinkWrap a').first().attr('href');
-        next_page = $('.nextLinkWrap a').length > 0;
-        timer(`PAGE[${PAGES_PARSED}]`).stop();
-        timer(`PAGE[${PAGES_PARSED}]`).result(time => {
-            console.log(`Page parsed in ${time}ms\n\n`);
-            PAGES_PARSE_TIMES.push(time);
-        });
-        PAGES_PARSED++;
-    } while (next_page);
-
-    // MEMBERS[target.type] = members;
-
-    console.log(`All ${target.type} member data scraped.`);
-
-    console.log('Exiting phantom instance.');
-    instance.exit();
+    console.log(`All ${member_type} member data scraped.`);
     console.log('Done!\n\n');
     console.log('Performance analysis...');
-    console.log(formatPerformanceResults())
+    let results = getPerformanceResults();
+    console.log(formatPerformanceResults(results));
 }
 
 function* initPhantomInstance() {
@@ -104,7 +58,54 @@ function* initPhantomInstance() {
     return yield phantom.create();
 }
 
-function* scrapeMemberData($row, $, instance) {
+function* scrapePage(url, member_type) {
+    timer(`PAGE[${PAGES_PARSED}]`).start();
+    let member = {};
+    let file = path.join(ROOT_DIR, `${member_type}_members.json`);
+    let html = yield * fetchPage(url);
+    let $ = cheerio.load(html);
+    if (PAGES_PARSED === 0) {
+        let total_entries = $(ENTRIES_COUNT_SELECTOR).text().match(/\d+'?\d+/);
+        TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
+        console.log(`Number of entries: ${total_entries.toString()}`);
+    }
+    if ($(CURRENT_ENTRIES_SELECTOR).length) {
+        console.log(`Parsing entries ${$(CURRENT_ENTRIES_SELECTOR).text()}`);
+    }
+
+    console.log('\n\n');
+    let $rows = $('.table-list-directory tr').not('.table-list-header').slice(0, 3);
+    for (let i = 0; i < $rows.length; i++) {
+        timer(`MEMBER[${MEMBERS_PARSED}]`).start();
+        console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
+        member = yield * scrapeMemberData($rows.eq(i), $);
+        writeToFile(file, JSON.stringify(member));
+        timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
+        timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
+            console.log(`Member parsed in ${time}ms\n\n`);
+            MEMBERS_PARSE_TIMES.push(time);
+        });
+        MEMBERS_PARSED++;
+    }
+
+    let next_page = $('.nextLinkWrap a').length > 0;
+    if (next_page) {
+        url = ROOT_URL + $('.nextLinkWrap a').first().attr('href');
+    } else {
+        url = null;
+    }
+
+    timer(`PAGE[${PAGES_PARSED}]`).stop();
+    timer(`PAGE[${PAGES_PARSED}]`).result(time => {
+        console.log(`Page parsed in ${time}ms\n\n`);
+        PAGES_PARSE_TIMES.push(time);
+    });
+    PAGES_PARSED++;
+
+    return url;
+}
+
+function* scrapeMemberData($row, $) {
     let member = {};
 
     const keys = parseColumnNames($);
@@ -115,14 +116,15 @@ function* scrapeMemberData($row, $, instance) {
     let url = getMemberUrl($row);
 
     console.log('Open member page');
-    let html = yield * fetchPage(instance, url);
+    let html = yield * fetchPage(url);
     console.log('Parsing detailed member data');
     member.details = parseDetailedMemberData(html);
 
     return member;
 }
 
-function* fetchPage(instance, url) {
+function* fetchPage(url) {
+    let instance = yield * initPhantomInstance();
     console.log('Phantom createPage');
     const page = yield instance.createPage();
     console.log('Setup selective resource blocking');
@@ -136,17 +138,10 @@ function* fetchPage(instance, url) {
     console.log('Closing page');
     yield page.close();
     console.log('Page closed');
+    instance.exit();
+    console.log('Phantom instance exited.');
     return html;
 }
-
-
-// function parseMemberData($) {
-//     let member = {};
-//     member = parseGeneralMemberData($);
-//     member.details = parseDetailedMemberData($);
-//
-//     return member;
-// }
 
 function parseGeneralMemberData($row, keys) {
     const $cells = $row.find('td');
@@ -236,23 +231,34 @@ function cleanFile(file) {
     console.log('Cleaning file - Done!');
 }
 
-function formatPerformanceResults() {
-    let result = '';
-    let total_page_parse_time = PAGES_PARSE_TIMES.reduce(sum, 0);
-    let avg_page_parse_time = total_page_parse_time / PAGES_PARSED;
-    result += `Nr. of pages parsed: ${PAGES_PARSED}\n`;
-    result += `Total time for parsing pages: ${total_page_parse_time}ms\n`;
-    result += `Average parse time per page: ${avg_page_parse_time}ms\n`;
+function getPerformanceResults() {
+    let results = {
+        pages: {},
+        members: {}
+    };
 
-    result += '\n';
+    results.pages.count = PAGES_PARSED;
+    results.pages.total_time = PAGES_PARSE_TIMES.reduce(sum, 0);
+    results.pages.average_time = results.pages.total_time / results.pages.count;
 
-    let total_member_parse_time = MEMBERS_PARSE_TIMES.reduce(sum, 0);
-    let avg_member_parse_time = total_member_parse_time / MEMBERS_PARSED;
-    result += `Nr. of members parsed: ${MEMBERS_PARSED}\n`;
-    result += `Total time for parsing members: ${total_member_parse_time}ms\n`;
-    result += `Average parse time per member: ${avg_member_parse_time}ms\n`;
+    results.members.count = MEMBERS_PARSED;
+    results.members.total_time = MEMBERS_PARSE_TIMES.reduce(sum, 0);
+    results.members.average_time = results.members.total_time / results.members.count;
 
-    return result;
+    return results;
+}
+
+function formatPerformanceResults(results) {
+    let text = '';
+    text += `Nr. of pages parsed: ${results.pages.count}\n`;
+    text += `Total time for parsing pages: ${results.pages.total_time}ms\n`;
+    text += `Average parse time per page: ${results.pages.average_time}ms\n`;
+    text += '\n';
+    text += `Nr. of members parsed: ${results.members.count}\n`;
+    text += `Total time for parsing members: ${results.members.total_time}ms\n`;
+    text += `Average parse time per member: ${results.members.average_time}ms\n`;
+
+    return text;
 }
 
 function sum(a, b) {
@@ -266,9 +272,11 @@ function* blockResourceLoading(page) {
             /\.png/gi,
             /\.css/gi
         ];
-        if (BLOCKED_RESOURCES.some(function(r) {
-                return r.test(requestData['url']);
-            })) {
+        var is_blacklisted_resource = BLOCKED_RESOURCES.some(function(r) {
+            return r.test(requestData['url']);
+        });
+
+        if (is_blacklisted_resource) {
             // console.log('BLOCKED: ', requestData['url']);
             request.abort();
         }
