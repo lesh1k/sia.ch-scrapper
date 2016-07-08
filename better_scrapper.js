@@ -8,6 +8,8 @@ const co = require('co');
 const stringifyObject = require('stringify-object');
 const fs = require('fs');
 const path = require('path');
+const timer = require('./timer');
+
 
 const ROOT_URL = 'http://www.sia.ch';
 // const URL = 'http://www.sia.ch/en/membership/member-directory/honorary-members/';
@@ -23,7 +25,6 @@ const TARGETS = [{
 const ROOT_DIR = __dirname;
 const ENTRIES_COUNT_SELECTOR = '.csc-default > .tx-updsiafeuseradmin-pi1 > div.specPageBrowse.clearfix > h2 > span';
 const CURRENT_ENTRIES_SELECTOR = '.csc-default > .tx-updsiafeuseradmin-pi1 > div.specPageBrowse.clearfix > .browseBoxWrapTop > p > span';
-const MEMBERS = {};
 let PAGES_PARSED = 0;
 let PAGES_PARSE_TIMES = [];
 let MEMBERS_PARSED = 0;
@@ -43,15 +44,14 @@ function* scrape(target) {
 
     let instance = yield * initPhantomInstance();
     let url = target.url;
-    let iteration = 0;
     let next_page;
     let file = path.join(ROOT_DIR, `${target.type}_members.json`);
     cleanFile(file);
     do {
-        let time_page_parse_start = new Date();
+        timer(`PAGE[${PAGES_PARSED}]`).start();
         let html = yield * fetchPage(instance, url);
         let $ = cheerio.load(html);
-        if (iteration === 0) {
+        if (PAGES_PARSED === 0) {
             let total_entries = $(ENTRIES_COUNT_SELECTOR).text().match(/\d+'?\d+/);
             TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
             console.log(`Number of entries: ${total_entries.toString()}`);
@@ -61,28 +61,30 @@ function* scrape(target) {
         }
 
         console.log('\n\n');
-        let $rows = $('.table-list-directory tr').not('.table-list-header');
+        let $rows = $('.table-list-directory tr').not('.table-list-header').slice(0, 3);
         for (let i = 0; i < $rows.length; i++) {
-            let time_member_parse_start = new Date();
+            timer(`MEMBER[${MEMBERS_PARSED}]`).start();
             console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
             member = yield * scrapeMemberData($rows.eq(i), $, instance);
             // members.push(member);
             // let file = path.join(ROOT_DIR, `${target.type}.json`);
             writeToFile(file, JSON.stringify(member));
-            let time_member_parse_end = new Date();
-            let time_member_parse = time_member_parse_end - time_member_parse_start;
-            console.log(`Member parsed in ${time_member_parse}ms\n\n`);
+            timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
+            timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
+                console.log(`Member parsed in ${time}ms\n\n`);
+                MEMBERS_PARSE_TIMES.push(time);
+            });
             MEMBERS_PARSED++;
-            MEMBERS_PARSE_TIMES.push(time_member_parse);
         }
 
         url = ROOT_URL + $('.nextLinkWrap a').first().attr('href');
         next_page = $('.nextLinkWrap a').length > 0;
-        let time_page_parse_end = new Date();
-        let time_page_parse = time_page_parse_end - time_page_parse_start;
-        console.log(`Page parsed in ${time_page_parse}ms`);
+        timer(`PAGE[${PAGES_PARSED}]`).stop();
+        timer(`PAGE[${PAGES_PARSED}]`).result(time => {
+            console.log(`Page parsed in ${time}ms\n\n`);
+            PAGES_PARSE_TIMES.push(time);
+        });
         PAGES_PARSED++;
-        PAGES_PARSE_TIMES.push(time_page_parse);
     } while (next_page);
 
     // MEMBERS[target.type] = members;
@@ -245,7 +247,7 @@ function formatPerformanceResults() {
     result += '\n';
 
     let total_member_parse_time = MEMBERS_PARSE_TIMES.reduce(sum, 0);
-    let avg_member_parse_time = total_page_parse_time / MEMBERS_PARSED;
+    let avg_member_parse_time = total_member_parse_time / MEMBERS_PARSED;
     result += `Nr. of members parsed: ${MEMBERS_PARSED}\n`;
     result += `Total time for parsing members: ${total_member_parse_time}ms\n`;
     result += `Average parse time per member: ${avg_member_parse_time}ms\n`;
