@@ -5,7 +5,6 @@
 const phantom = require('phantom');
 const cheerio = require('cheerio');
 const co = require('co');
-const stringifyObject = require('stringify-object');
 const fs = require('fs');
 const path = require('path');
 const timer = require('./timer');
@@ -60,8 +59,6 @@ function* initPhantomInstance() {
 
 function* scrapePage(url, member_type) {
     timer(`PAGE[${PAGES_PARSED}]`).start();
-    let member = {};
-    let file = path.join(ROOT_DIR, `${member_type}_members.json`);
     let html = yield * fetchPage(url);
     let $ = cheerio.load(html);
     if (PAGES_PARSED === 0) {
@@ -74,19 +71,7 @@ function* scrapePage(url, member_type) {
     }
 
     console.log('\n\n');
-    let $rows = $('.table-list-directory tr').not('.table-list-header').slice(0, 3);
-    for (let i = 0; i < $rows.length; i++) {
-        timer(`MEMBER[${MEMBERS_PARSED}]`).start();
-        console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-        member = yield * scrapeMemberData($rows.eq(i), $);
-        writeToFile(file, JSON.stringify(member));
-        timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
-        timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
-            console.log(`Member parsed in ${time}ms\n\n`);
-            MEMBERS_PARSE_TIMES.push(time);
-        });
-        MEMBERS_PARSED++;
-    }
+    yield * scrapeMembers($, member_type);
 
     let next_page = $('.nextLinkWrap a').length > 0;
     if (next_page) {
@@ -103,6 +88,23 @@ function* scrapePage(url, member_type) {
     PAGES_PARSED++;
 
     return url;
+}
+
+function* scrapeMembers($, member_type) {
+    let file = path.join(ROOT_DIR, `${member_type}_members.json`);
+    let $rows = $('.table-list-directory tr').not('.table-list-header').slice(0, 3);
+    for (let i = 0; i < $rows.length; i++) {
+        timer(`MEMBER[${MEMBERS_PARSED}]`).start();
+        console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
+        let member = yield * scrapeMemberData($rows.eq(i), $);
+        writeToFile(file, JSON.stringify(member));
+        timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
+        timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
+            console.log(`Member parsed in ${time}ms\n\n`);
+            MEMBERS_PARSE_TIMES.push(time);
+        });
+        MEMBERS_PARSED++;
+    }
 }
 
 function* scrapeMemberData($row, $) {
