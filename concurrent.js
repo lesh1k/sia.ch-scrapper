@@ -8,6 +8,8 @@ const co = require('co');
 const stringifyObject = require('stringify-object');
 const fs = require('fs');
 const path = require('path');
+const Worker = require('webworker-threads').Worker;
+
 
 const ROOT_URL = 'http://www.sia.ch';
 // const URL = 'http://www.sia.ch/en/membership/member-directory/honorary-members/';
@@ -82,21 +84,66 @@ function* scrapePage(url, instance, file) {
 
     console.log('\n\n');
     let $rows = $('.table-list-directory tr').not('.table-list-header');
-    let member;
-    for (let i = 0; i < $rows.length; i++) {
-        timer('member').start();
-        console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-        member = yield * scrapeMemberData($rows.eq(i), $, instance);
-        // members.push(member);
-        // let file = path.join(ROOT_DIR, `${target.type}.json`);
-        writeToFile(file, JSON.stringify(member));
-        timer('member').stop();
-        timer('member').result(t => {
-            console.log(`Member parsed in ${t}ms\n\n`);
-            MEMBERS_PARSE_TIMES.push(t);
-        });
-        MEMBERS_PARSED++;
-    }
+    let members_on_page_count = $rows.length;
+
+
+
+    let promises = $rows.map(() => {
+        console.log('Phantom createPage');
+        return instance.createPage();
+    });
+
+    let pages = yield Promise.all(Array.prototype.slice.call(promises));
+    console.log('GOT HERE');
+
+    let workers = pages.map((page, i) => {
+        let w = new Worker('worker.js');
+
+        w.onerror = err => console.error(err);
+        w.onmessage = evt => console.log('WORKER said: ', evt.data);
+        let url = getMemberUrl($rows.eq(i));
+        w.postMessage({url: url, index: i});
+    });
+
+    // yield Promise.all(pages.map((page, i) => {
+    //     console.log('Get URL to member page');
+    //     let url = getMemberUrl($rows.eq(i));
+    //     console.log('Opening URL', url);
+    //     return page.open(url);
+    // }));
+    //
+    // let members_pages = yield Promise.all(pages.map(page => {
+    //     console.log('Getting page content');
+    //     return page.property('content');
+    // }));
+    //
+    // let members_on_page = members_pages.map((html, i) => {
+    //     return scrapeMemberDataSync($rows.eq(i), $, html);
+    // });
+    //
+    // yield Promise.all(pages.map(page => {
+    //     console.log('Closing page');
+    //     return page.close();
+    //     console.log('Page closed');
+    // }));
+
+    writeToFile(file, JSON.stringify(members_on_page));
+
+    // let member;
+    // for (let i = 0; i < $rows.length; i++) {
+    //     timer('member').start();
+    //     console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
+    //     member = yield * scrapeMemberData($rows.eq(i), $, instance);
+    //     // members.push(member);
+    //     // let file = path.join(ROOT_DIR, `${target.type}.json`);
+    //     writeToFile(file, JSON.stringify(member));
+    //     timer('member').stop();
+    //     timer('member').result(t => {
+    //         console.log(`Member parsed in ${t}ms\n\n`);
+    //         MEMBERS_PARSE_TIMES.push(t);
+    //     });
+    //     MEMBERS_PARSED++;
+    // }
 
 
     url = ROOT_URL + $('.nextLinkWrap a').first().attr('href');
@@ -136,6 +183,55 @@ function createTimer() {
     };
 }
 
+function promiseToScrapeMemberData($row, $, instance) {
+    let member_number = ++MEMBERS_PARSED;
+    console.log(`[PROMISE] Member ${member_number} of ${TOTAL_ENTRIES}`);
+    let p = new Promise((resolve, reject) => {
+        console.log(`[PARSING] Member ${member_number} of ${TOTAL_ENTRIES}`);
+        let member = {};
+
+        const keys = parseColumnNames($);
+        console.log('Parsing general member data');
+        member = parseGeneralMemberData($row, keys);
+
+        console.log('Get URL to member page');
+        let url = getMemberUrl($row);
+
+        console.log('Open member page');
+        let worker = new Worker(function() {
+            self.onmessage = evt => {
+                if (evt.data == 'begin') {
+                    self.postMessage('WORKER STARTED');
+                    try {
+                        self.postMessage('WORKER at its job');
+                        co(fetchPage(instance, url))
+                        .then(html => {
+                            self.postMessage('Parsing detailed member data #', member_number);
+                            member.details = parseDetailedMemberData(html);
+                            self.postMessage(member);
+                            self.postMessage('Member parsed #', member);
+                            self.postMessage('CLOSING WORKER');
+                            self.close();
+                        });
+                    } catch (e) {
+                        self.postMessage(`ERROR: ${e}`);
+                    }
+                } else {
+                    self.postMessage('MASTER said: ', evt.data);
+                }
+            };
+        });
+
+        worker.onmessage = evt => {
+            console.log('WORKER said: ', evt.data);
+        };
+
+        worker.postMessage('begin');
+    });
+
+    return p;
+}
+
 function* scrapeMemberData($row, $, instance) {
     let member = {};
 
@@ -148,6 +244,23 @@ function* scrapeMemberData($row, $, instance) {
 
     console.log('Open member page');
     let html = yield * fetchPage(instance, url);
+    console.log('Parsing detailed member data');
+    member.details = parseDetailedMemberData(html);
+
+    return member;
+}
+
+function scrapeMemberDataSync($row, $, html) {
+    let member = {};
+
+    const keys = parseColumnNames($);
+    console.log('Parsing general member data');
+    member = parseGeneralMemberData($row, keys);
+
+    // console.log('Get URL to member page');
+    // let url = getMemberUrl($row);
+
+    // console.log('Open member page');
     console.log('Parsing detailed member data');
     member.details = parseDetailedMemberData(html);
 
