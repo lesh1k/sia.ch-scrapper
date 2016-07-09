@@ -8,6 +8,9 @@ const co = require('co');
 const fs = require('fs');
 const path = require('path');
 const timer = require('./timer');
+const cluster = require('cluster');
+const NUM_CPUs = require('os').cpus().length;
+const stringifyObject = require('stringify-object');
 
 
 const ROOT_URL = 'http://www.sia.ch';
@@ -30,12 +33,43 @@ let MEMBERS_PARSED = 0;
 let MEMBERS_PARSE_TIMES = [];
 let TOTAL_ENTRIES = 0;
 
+if (cluster.isMaster) {
+    TARGETS.forEach(target => {
+        co(scrape(target.url, target.type));
+    });
+} else {
+    process.send({
+        msg: 'Worker alive!'
+    });
 
-TARGETS.forEach(target => {
-    co(scrape(target.url, target.type));
-});
+    process.send({
+        msg: 'Prepare arguments.'
+    });
+
+    let index_from, index_to, keys, member_type, url;
+    ({index_from, index_to, keys, member_type, url} = process.env);
+
+    process.send({
+        msg: 'Begin scraping members.'
+    });
+
+    co(function* () {
+        let $rows = yield * getRows(url, member_type, index_from, index_to);
+        keys = keys.split(',');
+        return yield * scrapeMembers($rows, keys, member_type);
+    })
+    .then(members => {
+        process.send({
+            msg: 'Done!',
+            data: members
+        });
+        process.disconnect();
+    });
+}
 
 
+
+/**************************************************************/
 function* scrape(url, member_type) {
     console.log(`Begin scraping ${member_type} members.`);
     let file = path.join(ROOT_DIR, `${member_type}_members.json`);
@@ -75,11 +109,11 @@ function* scrapePage(url, member_type) {
     let $rows = $('.table-list-directory tr').not('.table-list-header');
 
     // DEBUG ONLY
-    $rows = $rows.slice(0, 3);
+    // $rows = $rows.slice(0, 5);
     // EOF DEBUG ONLY
 
-    yield * scrapeMembers($rows, keys, member_type);
-
+    let members = yield * delegateProcessingToWorkers(url, $rows, keys, member_type);
+    console.log('SHOULD HAVE ALL MEMBERS', stringifyObject(members));
     let next_page = $('.nextLinkWrap a').length > 0;
     if (next_page) {
         url = ROOT_URL + $('.nextLinkWrap a').first().attr('href');
@@ -97,19 +131,109 @@ function* scrapePage(url, member_type) {
     return url;
 }
 
-function* scrapeMembers($rows, keys, member_type) {
-    let file = path.join(ROOT_DIR, `${member_type}_members.json`);
-    for (let i = 0; i < $rows.length; i++) {
-        timer(`MEMBER[${MEMBERS_PARSED}]`).start();
-        console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-        let member = yield * scrapeMemberData($rows.eq(i), keys);
-        writeToFile(file, JSON.stringify(member));
-        timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
-        timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
-            console.log(`Member parsed in ${time}ms\n\n`);
-            MEMBERS_PARSE_TIMES.push(time);
+function* getRows(url, member_type, index_from, index_to) {
+    timer(`PAGE[${PAGES_PARSED}]`).start();
+    let html = yield * fetchPage(url);
+    let $ = cheerio.load(html);
+    // if (PAGES_PARSED === 0) {
+    //     let total_entries = $(ENTRIES_COUNT_SELECTOR).text().match(/\d+'?\d+/);
+    //     TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
+    //     console.log(`Number of entries: ${total_entries.toString()}`);
+    // }
+    // if ($(CURRENT_ENTRIES_SELECTOR).length) {
+    //     console.log(`Parsing entries ${$(CURRENT_ENTRIES_SELECTOR).text()}`);
+    // }
+    //
+    // console.log('\n\n');
+    // const keys = parseColumnNames($);
+    let $rows = $('.table-list-directory tr').not('.table-list-header');
+
+    return $rows.slice(index_from, index_to);
+}
+
+function* delegateProcessingToWorkers(url, $rows, keys, member_type) {
+    const entries_to_parse_count = $rows.length;
+    const urls_per_worker = $rows.length / NUM_CPUs;
+    const worker_ids = [];
+    let members = [];
+    yield new Promise((resolve) => {
+        cluster.on('online', workerOnlineHandler);
+        cluster.on('message', (worker, message) => {
+            if (message.data) {
+                console.log(`[WORKER (ID=${worker.id})] has processed the URLs`);
+                members = members.concat(message.data);
+            }
+
+            if (members.length === entries_to_parse_count) {
+                resolve(members);
+            }
+
+            console.log(`[WORKER (ID=${worker.id}) said]`, message.msg);
         });
-        MEMBERS_PARSED++;
+        cluster.on('exit', workerExitHandler);
+
+        for (let i = 0; i < NUM_CPUs; i++) {
+            let index_from = i * urls_per_worker;
+            let index_to = 0;
+            if (i === NUM_CPUs - 1) {
+                index_to = $rows.length;
+            } else {
+                index_to = (i + 1) * urls_per_worker;
+            }
+
+            let worker = cluster.fork({
+                index_from: index_from,
+                index_to: index_to,
+                keys: keys,
+                member_type: member_type,
+                url: url
+            });
+            worker_ids.push(worker.id);
+        }
+    });
+
+    return members;
+}
+
+function workerOnlineHandler(worker) {
+    console.log(`Worker (ID=${worker.id}) is ONLINE`);
+}
+
+function workerMessageHandler(worker, msg, handle) {
+    console.log(`[WORKER (ID=${worker.id}) said]`, msg);
+}
+
+function workerExitHandler(worker, code, signal) {
+    if (signal) {
+        console.log(`worker (ID=${worker.id}) was killed by signal: ${signal}`);
+    } else if (code !== 0) {
+        console.log(`worker (ID=${worker.id}) exited with error code: ${code}`);
+    } else {
+        console.log(`worker (ID=${worker.id}) exited with success!`);
+    }
+}
+
+function* scrapeMembers($rows, keys, member_type) {
+    try {
+        let members = [];
+        // let file = path.join(ROOT_DIR, `${member_type}_members.json`);
+        for (let i = 0; i < $rows.length; i++) {
+            timer(`MEMBER[${MEMBERS_PARSED}]`).start();
+            console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
+            let member = yield * scrapeMemberData($rows.eq(i), keys);
+            members.push(member);
+            // writeToFile(file, JSON.stringify(member));
+            timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
+            timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
+                console.log(`Member parsed in ${time}ms\n\n`);
+                MEMBERS_PARSE_TIMES.push(time);
+            });
+            MEMBERS_PARSED++;
+        }
+
+        return members;
+    } catch (e) {
+        console.error(e);
     }
 }
 
