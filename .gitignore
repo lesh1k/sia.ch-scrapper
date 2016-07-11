@@ -1,3 +1,5 @@
 node_modules/
 *_members.json
 profiler_data/
+collected_data/
+log/
