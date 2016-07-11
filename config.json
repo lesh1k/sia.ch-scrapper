@@ -1,10 +1,9 @@
 {
     "root_url": "http://www.sia.ch",
     "targets": [{
-        "type": "student",
-        "url": "http://www.sia.ch/en/membership/member-directory/student-members/"
-    }],
-    "skipped_targets": [{
+        "type": "honorary",
+        "url": "http://www.sia.ch/en/membership/member-directory/honorary-members/"
+    }, {
         "type": "individual",
         "url": "http://www.sia.ch/en/membership/member-directory/individual-members/"
     }, {
