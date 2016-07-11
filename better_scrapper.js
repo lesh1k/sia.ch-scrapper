@@ -9,7 +9,6 @@ const co = require('co');
 const fs = require('fs');
 const path = require('path');
 const cluster = require('cluster');
-// const stringifyObject = require('stringify-object');
 const NUM_CPUs = require('os').cpus().length;
 
 const timer = require('./timer');
@@ -57,59 +56,63 @@ function* initPhantomInstance() {
 }
 
 function* scrapePage(url, member_type) {
-    timer(`PAGE[${PAGES_PARSED}]`).start();
-    let html = yield * fetchPage(url);
-    let $ = cheerio.load(html);
-    if (PAGES_PARSED === 0) {
-        let total_entries = $(CONFIG.entries_count_selector).text().match(/\d+'?\d+/);
-        TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
-        console.log(`Number of entries: ${total_entries.toString()}`);
+    try {
+
+        timer(`PAGE[${PAGES_PARSED}]`).start();
+        let html = yield * fetchPage(url);
+        let $ = cheerio.load(html);
+        if (PAGES_PARSED === 0) {
+            let total_entries = $(CONFIG.entries_count_selector).text().match(/\d+'?\d+/);
+            TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
+            console.log(`Number of entries: ${total_entries.toString()}`);
+        }
+        if ($(CONFIG.current_entries_selector).length) {
+            console.log(`Parsing entries ${$(CONFIG.current_entries_selector).text()}`);
+        }
+        console.log('\n\n');
+
+        let next_page = $('.nextLinkWrap a').length > 0;
+        if (next_page) {
+            url = CONFIG.root_url + $('.nextLinkWrap a').first().attr('href');
+        } else {
+            url = null;
+        }
+
+        const keys = parseColumnNames($);
+        let $rows = $('.table-list-directory tr').not('.table-list-header');
+
+        let members = yield * delegateProcessingToWorkers(html, $rows.length, keys, member_type);
+        debugger
+        let json = JSON.stringify(members);
+        if (PAGES_PARSED > 0) {
+            json = json.replace('[', ',');
+        }
+
+        if (next_page) {
+            let index_of_array_closing_brace = json.lastIndexOf(']');
+            json = json.substr(0, index_of_array_closing_brace);
+        }
+        let file = path.join(ROOT_DIR, `${member_type}_members.json`);
+        writeToFile(file, json);
+
+
+        timer(`PAGE[${PAGES_PARSED}]`).stop();
+        timer(`PAGE[${PAGES_PARSED}]`).result(time => {
+            console.log(`Page parsed in ${time}ms\n\n`);
+            PAGES_PARSE_TIMES.push(time);
+        });
+        PAGES_PARSED++;
+
+        return url;
+    } catch (e) {
+        console.error(e);
+        throw e;
     }
-    if ($(CONFIG.current_entries_selector).length) {
-        console.log(`Parsing entries ${$(CONFIG.current_entries_selector).text()}`);
-    }
-
-    console.log('\n\n');
-    const keys = parseColumnNames($);
-    let $rows = $('.table-list-directory tr').not('.table-list-header');
-
-    let members = yield * delegateProcessingToWorkers(html, $rows.length, keys, member_type);
-    // console.log('SHOULD HAVE ALL MEMBERS', stringifyObject(members));
-    let json = JSON.stringify(members);
-    let file = path.join(ROOT_DIR, `${member_type}_members.json`);
-    writeToFile(file, json);
-    let next_page = $('.nextLinkWrap a').length > 0;
-    if (next_page) {
-        url = CONFIG.root_url + $('.nextLinkWrap a').first().attr('href');
-    } else {
-        url = null;
-    }
-
-    timer(`PAGE[${PAGES_PARSED}]`).stop();
-    timer(`PAGE[${PAGES_PARSED}]`).result(time => {
-        console.log(`Page parsed in ${time}ms\n\n`);
-        PAGES_PARSE_TIMES.push(time);
-    });
-    PAGES_PARSED++;
-
-    return url;
 }
 
 function getMemberRows(html, index_from, index_to) {
     timer(`PAGE[${PAGES_PARSED}]`).start();
-    // let html = yield * fetchPage(url);
     let $ = cheerio.load(html);
-    // if (PAGES_PARSED === 0) {
-    //     let total_entries = $(CONFIG.entries_count_selector).text().match(/\d+'?\d+/);
-    //     TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
-    //     console.log(`Number of entries: ${total_entries.toString()}`);
-    // }
-    // if ($(CONFIG.current_entries_selector).length) {
-    //     console.log(`Parsing entries ${$(CONFIG.current_entries_selector).text()}`);
-    // }
-    //
-    // console.log('\n\n');
-    // const keys = parseColumnNames($);
     let $rows = $('.table-list-directory tr').not('.table-list-header');
 
     return $rows.slice(index_from, index_to);
@@ -117,11 +120,10 @@ function getMemberRows(html, index_from, index_to) {
 
 function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
     const urls_per_worker = Math.ceil(rows_count / NUM_CPUs);
-    const worker_ids = [];
     let members = [];
+    let workerMessageHandler;
     yield new Promise((resolve) => {
-        cluster.on('online', workerOnlineHandler);
-        cluster.on('message', (worker, message) => {
+        workerMessageHandler = function workerMessageHandler(worker, message) {
             if (message.data) {
                 console.log(`[WORKER (ID=${worker.id})] has processed the URLs`);
                 members = members.concat(message.data);
@@ -142,8 +144,11 @@ function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
                 resolve(members);
             }
 
-            console.log(`[WORKER (ID=${worker.id}) said]`, message.msg);
-        });
+            console.log(`[WORKER (ID=${worker.id})] said`, message.msg);
+        };
+
+        cluster.on('online', workerOnlineHandler);
+        cluster.on('message', workerMessageHandler);
         cluster.on('exit', workerExitHandler);
 
         for (let i = 0; i < NUM_CPUs; i++) {
@@ -155,16 +160,20 @@ function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
                 index_to = (i + 1) * urls_per_worker;
             }
 
-            let worker = cluster.fork({
+            cluster.fork({
                 index_from: index_from,
                 index_to: index_to,
                 keys: keys,
                 member_type: member_type,
                 html: html
             });
-            worker_ids.push(worker.id);
         }
     });
+
+    console.log('Removing event listeners from clusters.');
+    cluster.removeListener('online', workerOnlineHandler);
+    cluster.removeListener('message', workerMessageHandler);
+    cluster.removeListener('exit', workerExitHandler);
 
     return members;
 }
@@ -173,17 +182,37 @@ function workerOnlineHandler(worker) {
     console.log(`Worker (ID=${worker.id}) is ONLINE`);
 }
 
-function workerMessageHandler(worker, msg, handle) {
-    console.log(`[WORKER (ID=${worker.id}) said]`, msg);
-}
+// function workerMessageHandler(members, rows_count, resolve, worker, message) {
+//     if (message.data) {
+//         console.log(`[WORKER (ID=${worker.id})] has processed the URLs`);
+//         members = members.concat(message.data);
+//     }
+//
+//     if (members.length === rows_count) {
+//         console.log('All members are parsed. Sorting by name...');
+//         members.sort((m1, m2) => {
+//             if (m1['Name'] < m2['Name']) {
+//                 return -1;
+//             } else if (m1['Name'] === m2['Name']) {
+//                 return 0;
+//             } else {
+//                 return 1;
+//             }
+//         });
+//         console.log('Sort complete!');
+//         resolve(members);
+//     }
+//
+//     console.log(`[WORKER (ID=${worker.id})] said`, message.msg);
+// }
 
 function workerExitHandler(worker, code, signal) {
     if (signal) {
-        console.log(`worker (ID=${worker.id}) was killed by signal: ${signal}`);
+        console.log(`[WORKER (ID=${worker.id})] was killed by signal: ${signal}`);
     } else if (code !== 0) {
-        console.log(`worker (ID=${worker.id}) exited with error code: ${code}`);
+        console.log(`[WORKER (ID=${worker.id})] exited with error code: ${code}`);
     } else {
-        console.log(`worker (ID=${worker.id}) exited with success!`);
+        console.log(`[WORKER (ID=${worker.id})] exited with success!`);
     }
 }
 
