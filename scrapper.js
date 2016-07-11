@@ -4,7 +4,6 @@
 'use strict';
 
 const cheerio = require('cheerio');
-const co = require('co');
 const fs = require('fs');
 const path = require('path');
 const cluster = require('cluster');
@@ -13,7 +12,6 @@ const NUM_CPUs = require('os').cpus().length;
 const CONFIG = require('./config.json');
 const timer = require('./timer');
 const utils = require('./utils');
-const workerWork = require('./worker');
 const ROOT_DIR = __dirname;
 
 
@@ -23,17 +21,11 @@ let MEMBERS_PARSED = 0;
 let MEMBERS_PARSE_TIMES = [];
 let TOTAL_ENTRIES = 0;
 
-if (cluster.isMaster) {
-    CONFIG.targets.forEach(target => {
-        co(scrape(target.url, target.type));
-    });
-} else {
-    workerWork();
-}
+module.exports = {
+    scrape: scrape
+};
 
 
-
-/**************************************************************/
 function* scrape(url, member_type) {
     console.log(`Begin scraping ${member_type} members.`);
     let file = path.join(ROOT_DIR, `${member_type}_members.json`);
