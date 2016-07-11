@@ -3,7 +3,6 @@
 
 'use strict';
 
-const phantom = require('phantom');
 const cheerio = require('cheerio');
 const co = require('co');
 const fs = require('fs');
@@ -11,8 +10,10 @@ const path = require('path');
 const cluster = require('cluster');
 const NUM_CPUs = require('os').cpus().length;
 
-const timer = require('./timer');
 const CONFIG = require('./config.json');
+const timer = require('./timer');
+const utils = require('./utils');
+const workerWork = require('./worker');
 const ROOT_DIR = __dirname;
 
 
@@ -49,17 +50,11 @@ function* scrape(url, member_type) {
     console.log(formatted_results);
 }
 
-function* initPhantomInstance() {
-    console.log('Initiate phantom');
-    console.log('Storing phantom instance.');
-    return yield phantom.create();
-}
-
 function* scrapePage(url, member_type) {
     try {
 
         timer(`PAGE[${PAGES_PARSED}]`).start();
-        let html = yield * fetchPage(url);
+        let html = yield * utils.fetchPage(url);
         let $ = cheerio.load(html);
         if (PAGES_PARSED === 0) {
             let total_entries = $(CONFIG.entries_count_selector).text().match(/\d+'?\d+/);
@@ -82,7 +77,6 @@ function* scrapePage(url, member_type) {
         let $rows = $('.table-list-directory tr').not('.table-list-header');
 
         let members = yield * delegateProcessingToWorkers(html, $rows.length, keys, member_type);
-        debugger
         let json = JSON.stringify(members);
         if (PAGES_PARSED > 0) {
             json = json.replace('[', ',');
@@ -108,14 +102,6 @@ function* scrapePage(url, member_type) {
         console.error(e);
         throw e;
     }
-}
-
-function getMemberRows(html, index_from, index_to) {
-    timer(`PAGE[${PAGES_PARSED}]`).start();
-    let $ = cheerio.load(html);
-    let $rows = $('.table-list-directory tr').not('.table-list-header');
-
-    return $rows.slice(index_from, index_to);
 }
 
 function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
@@ -182,30 +168,6 @@ function workerOnlineHandler(worker) {
     console.log(`Worker (ID=${worker.id}) is ONLINE`);
 }
 
-// function workerMessageHandler(members, rows_count, resolve, worker, message) {
-//     if (message.data) {
-//         console.log(`[WORKER (ID=${worker.id})] has processed the URLs`);
-//         members = members.concat(message.data);
-//     }
-//
-//     if (members.length === rows_count) {
-//         console.log('All members are parsed. Sorting by name...');
-//         members.sort((m1, m2) => {
-//             if (m1['Name'] < m2['Name']) {
-//                 return -1;
-//             } else if (m1['Name'] === m2['Name']) {
-//                 return 0;
-//             } else {
-//                 return 1;
-//             }
-//         });
-//         console.log('Sort complete!');
-//         resolve(members);
-//     }
-//
-//     console.log(`[WORKER (ID=${worker.id})] said`, message.msg);
-// }
-
 function workerExitHandler(worker, code, signal) {
     if (signal) {
         console.log(`[WORKER (ID=${worker.id})] was killed by signal: ${signal}`);
@@ -214,124 +176,6 @@ function workerExitHandler(worker, code, signal) {
     } else {
         console.log(`[WORKER (ID=${worker.id})] exited with success!`);
     }
-}
-
-function workerWork() {
-    process.send({
-        msg: 'Worker alive!'
-    });
-
-    process.send({
-        msg: 'Prepare arguments.'
-    });
-
-    let index_from, index_to, keys, member_type, html;
-    ({
-        index_from,
-        index_to,
-        keys,
-        member_type,
-        html
-    } = process.env);
-
-    process.send({
-        msg: `Begin scraping members (from ${index_from} to ${index_to}).`
-    });
-
-    TOTAL_ENTRIES = index_to - index_from;
-    co(function*() {
-            let $rows = getMemberRows(html, index_from, index_to);
-            keys = keys.split(',');
-            return yield * scrapeMembers($rows, keys, member_type);
-        })
-        .then(members => {
-            process.send({
-                msg: 'Done!',
-                data: members
-            });
-            process.disconnect();
-        });
-}
-
-function* scrapeMembers($rows, keys) {
-    try {
-        let members = [];
-        let instance = yield * initPhantomInstance();
-        for (let i = 0; i < $rows.length; i++) {
-            timer(`MEMBER[${MEMBERS_PARSED}]`).start();
-            console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-            let member = yield * scrapeMemberData($rows.eq(i), keys, instance);
-            members.push(member);
-            timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
-            timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
-                console.log(`Member parsed in ${time}ms\n\n`);
-                MEMBERS_PARSE_TIMES.push(time);
-            });
-            MEMBERS_PARSED++;
-        }
-
-        instance.exit();
-        return members;
-    } catch (e) {
-        console.error(e);
-    }
-}
-
-function* scrapeMemberData($row, keys, instance) {
-    let member = {};
-
-    console.log('Parsing general member data');
-    member = parseGeneralMemberData($row, keys);
-
-    console.log('Get URL to member page');
-    let url = getMemberUrl($row);
-
-    console.log('Open member page');
-    let html = yield * fetchPage(url, instance);
-    console.log('Parsing detailed member data');
-    member.details = parseDetailedMemberData(html);
-
-    return member;
-}
-
-function* fetchPage(url, instance) {
-    let is_local_instance = false;
-    if (!instance) {
-        instance = yield * initPhantomInstance();
-        is_local_instance = true;
-    }
-
-    console.log('Phantom createPage');
-    const page = yield instance.createPage();
-    console.log('Setup selective resource blocking');
-    yield * blockResourceLoading(page);
-
-    console.log('Opening URL', url);
-    let status = yield page.open(url);
-    console.log('URL opened. Status: ', status);
-    console.log('Getting page content');
-    let html = yield page.property('content');
-    console.log('Closing page');
-    yield page.close();
-    console.log('Page closed');
-    if (is_local_instance) {
-        instance.exit();
-        console.log('Phantom instance exited.');
-    }
-    return html;
-}
-
-function parseGeneralMemberData($row, keys) {
-    const $cells = $row.find('td');
-    const data = {};
-
-    $cells.each((i, cell) => {
-        if (keys[i]) {
-            data[keys[i]] = $row.find(cell).find('br').replaceWith('\n').end().text().trim();
-        }
-    });
-
-    return data;
 }
 
 function parseColumnNames($) {
@@ -344,49 +188,6 @@ function parseColumnNames($) {
     });
 
     return keys;
-}
-
-function getMemberUrl($row) {
-    const $cell = $row.find('td').first();
-    const member_url = CONFIG.root_url + $cell.find('a').attr('href');
-
-    return member_url;
-}
-
-function parseDetailedMemberData(html) {
-    const $ = cheerio.load(html);
-    const details = {};
-    let key = '';
-    $('tr').each((i, row) => {
-        let $head_cell = $(row).find('th');
-        if ($head_cell.length) {
-            key = $head_cell.find('br').replaceWith('\n').end().text().trim();
-            details[key] = {};
-        } else {
-            let $cells = $(row).find('td');
-            if (!$cells.text()) return;
-            if ($cells.length === 1) {
-                details[key] = $cells.find('br').replaceWith('\n').end().text().trim();
-            } else {
-                let sub_key = $cells.first().find('br').replaceWith('\n').end().text().trim();
-                let cell_data = $cells.not(':first-child').find('br').replaceWith('\n').end().text().trim();
-                if ((sub_key.match(/\n+/g) || []).length === (cell_data.match(/\n+/g) || []).length) {
-                    let keys = sub_key.split(/\n+/g);
-                    let values = cell_data.split(/\n+/g);
-                    for (let i = 0; i < keys.length; i++) {
-                        let k = keys[i].trim();
-                        let v = values[i].trim();
-                        if (!k) continue;
-                        details[key][k] = v;
-                    }
-                } else {
-                    details[key][sub_key] = cell_data;
-                }
-            }
-        }
-    });
-
-    return details;
 }
 
 function writeToFile(file, data) {
@@ -441,25 +242,4 @@ function formatPerformanceResults(results) {
 
 function sum(a, b) {
     return a + b;
-}
-
-function* blockResourceLoading(page) {
-    yield page.property('onResourceRequested', function(requestData, request) {
-        var BLOCKED_RESOURCES = [
-            /\.gif/gi,
-            /\.png/gi,
-            /\.css/gi,
-            /^((?!(feuseradmin\.js|tinymce|jquery-)).)*\.js.*/gi
-        ];
-        var is_blacklisted_resource = BLOCKED_RESOURCES.some(function(r) {
-            return r.test(requestData['url']);
-        });
-
-        if (is_blacklisted_resource) {
-            // console.log('BLOCKED: ', requestData['url']);
-            request.abort();
-        } else {
-            console.log('[RESOURCE ALLOWED]', requestData.url);
-        }
-    });
 }

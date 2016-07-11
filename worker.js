@@ -1,136 +1,134 @@
 /* eslint-env node */
+/* eslint no-console: 0 */
 
 'use strict';
 
-const phantom = require('phantom');
 const cheerio = require('cheerio');
 const co = require('co');
-const stringifyObject = require('stringify-object');
-const cluster = require('cluster');
+
+const timer = require('./timer');
+const utils = require('./utils');
+const CONFIG = require('./config.json');
 
 
-const ROOT_URL = 'http://www.sia.ch';
-const URL = 'http://www.sia.ch/en/membership/member-directory/honorary-members/';
-// let URL;
-let INDEX;
-console.log('Worker YOPTA');
-
-self.onmessage = evt => {
-    if (evt.data.url) {
-        self.postMessage('Begin work');
-        // URL = evt.data.url;
-        INDEX = evt.data.index;
-        co(scrape())
-            .then(member => self.postMessage(member));
-    } else {
-        console.log(evt.data);
-    }
-};
+let PAGES_PARSED = 0;
+let PAGES_PARSE_TIMES = [];
+let MEMBERS_PARSED = 0;
+let MEMBERS_PARSE_TIMES = [];
+let TOTAL_ENTRIES = 0;
 
 
-function *scrape() {
-    let member = {};
+module.exports = workerWork;
 
-    let instance = yield *initPhantomInstance();
-    member = yield *scrapeMemberData(instance);
-
-    console.log('All member data scraped.');
-    console.log('Fetched member data:');
-    console.log(stringifyObject(member));
-
-    console.log('Exiting phantom instance.');
-    yield instance.exit();
-    console.log('Done!');
-    return member;
-}
-
-function *initPhantomInstance() {
-    console.log('Initiate phantom');
-    console.log('Storing phantom instance.');
-    return yield phantom.create();
-}
-
-function *scrapeMemberData(instance) {
-    let html = yield *fetchPage(instance, URL);
-    let member = {};
-
-    console.log('Parsing page content');
+/**************************************************************/
+function getMemberRows(html, index_from, index_to) {
+    timer(`PAGE[${PAGES_PARSED}]`).start();
     let $ = cheerio.load(html);
+    let $rows = $('.table-list-directory tr').not('.table-list-header');
+
+    return $rows.slice(index_from, index_to);
+}
+
+function workerWork() {
+    process.send({
+        msg: 'Worker alive!'
+    });
+
+    process.send({
+        msg: 'Prepare arguments.'
+    });
+
+    let index_from, index_to, keys, member_type, html;
+    ({
+        index_from,
+        index_to,
+        keys,
+        member_type,
+        html
+    } = process.env);
+
+    process.send({
+        msg: `Begin scraping members (from ${index_from} to ${index_to}).`
+    });
+
+    TOTAL_ENTRIES = index_to - index_from;
+    co(function*() {
+            let $rows = getMemberRows(html, index_from, index_to);
+            keys = keys.split(',');
+            return yield * scrapeMembers($rows, keys, member_type);
+        })
+        .then(members => {
+            process.send({
+                msg: 'Done!',
+                data: members
+            });
+            process.disconnect();
+        });
+}
+
+function* scrapeMembers($rows, keys) {
+    try {
+        let members = [];
+        let instance = yield * utils.initPhantomInstance();
+        for (let i = 0; i < $rows.length; i++) {
+            timer(`MEMBER[${MEMBERS_PARSED}]`).start();
+            console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
+            let member = yield * scrapeMemberData($rows.eq(i), keys, instance);
+            members.push(member);
+            timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
+            timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
+                console.log(`Member parsed in ${time}ms\n\n`);
+                MEMBERS_PARSE_TIMES.push(time);
+            });
+            MEMBERS_PARSED++;
+        }
+
+        instance.exit();
+        return members;
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function* scrapeMemberData($row, keys, instance) {
+    let member = {};
+
     console.log('Parsing general member data');
-    member = parseGeneralMemberData($);
+    member = parseGeneralMemberData($row, keys);
 
     console.log('Get URL to member page');
-    let url = getMemberUrl($);
+    let url = getMemberUrl($row);
 
     console.log('Open member page');
-    html = yield *fetchPage(instance, url);
-
-    console.log('Parsing page content');
-    $ = cheerio.load(html);
+    let html = yield * utils.fetchPage(url, instance);
     console.log('Parsing detailed member data');
-    member.details = parseDetailedMemberData($);
+    member.details = parseDetailedMemberData(html);
 
     return member;
 }
 
-function *fetchPage(instance, url) {
-    console.log('Phantom createPage');
-    const page = yield instance.createPage();
-    console.log('Opening URL', url);
-    let status = yield page.open(url);
-    console.log('URL opened. Status: ', status);
-    console.log('Getting page content');
-    let html = yield page.property('content');
-    console.log('Closing page');
-    yield page.close();
-    return html;
-}
-
-
-// function parseMemberData($) {
-//     let member = {};
-//     member = parseGeneralMemberData($);
-//     member.details = parseDetailedMemberData($);
-//
-//     return member;
-// }
-
-function parseGeneralMemberData($) {
-    const keys = parseColumnNames($);
-    const $row = $('.table-list-directory tr').not('.table-list-header').eq(INDEX);
+function parseGeneralMemberData($row, keys) {
     const $cells = $row.find('td');
     const data = {};
 
     $cells.each((i, cell) => {
         if (keys[i]) {
-            data[keys[i]] = $(cell).find('br').replaceWith('\n').end().text().trim();
+            data[keys[i]] = $row.find(cell).find('br').replaceWith('\n').end().text().trim();
         }
     });
 
     return data;
 }
 
-function parseColumnNames($) {
-    console.log('Parsing column names');
-    const keys = [];
-    const $thead = $('.table-list-directory .table-list-header');
-
-    $thead.find('th').each((i, th) => {
-        keys.push($(th).find('br').replaceWith(' ').end().text().trim());
-    });
-
-    return keys;
-}
-
-function getMemberUrl($) {
-    const $row = $('.table-list-directory tr').not('.table-list-header').eq(INDEX);
+function getMemberUrl($row) {
     const $cell = $row.find('td').first();
-    const member_url = ROOT_URL + $cell.find('a').attr('href');
+    const member_url = CONFIG.root_url + $cell.find('a').attr('href');
 
     return member_url;
 }
 
-function parseDetailedMemberData($) {
+function parseDetailedMemberData(html) {
+    const $ = cheerio.load(html);
     const details = {};
     let key = '';
     $('tr').each((i, row) => {
