@@ -4,53 +4,45 @@
 'use strict';
 
 const cheerio = require('cheerio');
-const fs = require('fs');
 const path = require('path');
 const cluster = require('cluster');
 const NUM_CPUs = require('os').cpus().length;
 
+const NUMBER_OF_WORKERS = 2 * NUM_CPUs;
 const CONFIG = require('./config.json');
 const timer = require('./timer');
 const utils = require('./utils');
+const helpers = require('./helpers');
+const metrics = require('./metrics');
 const ROOT_DIR = __dirname;
-
-
-let PAGES_PARSED = 0;
-let PAGES_PARSE_TIMES = [];
-let MEMBERS_PARSED = 0;
-let MEMBERS_PARSE_TIMES = [];
-let TOTAL_ENTRIES = 0;
-
-module.exports = {
-    scrape: scrape
-};
 
 
 function* scrape(url, member_type) {
     console.log(`Begin scraping ${member_type} members.`);
-    let file = path.join(ROOT_DIR, `${member_type}_members.json`);
-    cleanFile(file);
+    let file = path.join(ROOT_DIR, CONFIG.data_dir, `${member_type}_members.json`);
+    utils.cleanFile(file);
     while (url) {
         url = yield * scrapePage(url, member_type);
     }
 
     console.log(`All ${member_type} member data scraped.`);
     console.log('Done!\n\n');
-    console.log('Performance analysis...');
-    let results = getPerformanceResults();
-    let formatted_results = formatPerformanceResults(results);
+
+    console.log(helpers.title('Performance analysis'));
+    let formatted_results = metrics.formatPerformanceResults(metrics.data.pages, 'PAGE(s)');
+    formatted_results += metrics.formatPerformanceResults(metrics.data.members, 'MEMBER(s)');
     console.log(formatted_results);
 }
 
 function* scrapePage(url, member_type) {
     try {
 
-        timer(`PAGE[${PAGES_PARSED}]`).start();
+        timer('PAGE').start();
         let html = yield * utils.fetchPage(url);
         let $ = cheerio.load(html);
-        if (PAGES_PARSED === 0) {
+        if (metrics.data.pages.parsed === 0) {
             let total_entries = $(CONFIG.entries_count_selector).text().match(/\d+'?\d+/);
-            TOTAL_ENTRIES = total_entries.toString().replace('\'', '');
+            metrics.data.members.total = total_entries.toString().replace('\'', '');
             console.log(`Number of entries: ${total_entries.toString()}`);
         }
         if ($(CONFIG.current_entries_selector).length) {
@@ -67,10 +59,11 @@ function* scrapePage(url, member_type) {
 
         const keys = parseColumnNames($);
         let $rows = $('.table-list-directory tr').not('.table-list-header');
+        metrics.data.pages.total = Math.ceil(metrics.data.members.total / $rows.length);
 
         let members = yield * delegateProcessingToWorkers(html, $rows.length, keys, member_type);
         let json = JSON.stringify(members);
-        if (PAGES_PARSED > 0) {
+        if (metrics.data.pages.parsed > 0) {
             json = json.replace('[', ',');
         }
 
@@ -78,16 +71,18 @@ function* scrapePage(url, member_type) {
             let index_of_array_closing_brace = json.lastIndexOf(']');
             json = json.substr(0, index_of_array_closing_brace);
         }
-        let file = path.join(ROOT_DIR, `${member_type}_members.json`);
-        writeToFile(file, json);
+        let file = path.join(ROOT_DIR, CONFIG.data_dir, `${member_type}_members.json`);
+        utils.writeToFile(file, json);
 
 
-        timer(`PAGE[${PAGES_PARSED}]`).stop();
-        timer(`PAGE[${PAGES_PARSED}]`).result(time => {
+        timer('PAGE').stop();
+        timer('PAGE').result(time => {
             console.log(`Page parsed in ${time}ms\n\n`);
-            PAGES_PARSE_TIMES.push(time);
+            metrics.data.pages.time.total += time;
+            metrics.data.pages.time.min = metrics.data.pages.time.min ? Math.min(metrics.data.pages.time.min, time) : time;
+            metrics.data.pages.time.max = Math.max(metrics.data.pages.time.max, time);
         });
-        PAGES_PARSED++;
+        metrics.data.pages.parsed++;
 
         return url;
     } catch (e) {
@@ -97,7 +92,7 @@ function* scrapePage(url, member_type) {
 }
 
 function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
-    const urls_per_worker = Math.ceil(rows_count / NUM_CPUs);
+    const urls_per_worker = Math.round(rows_count / NUMBER_OF_WORKERS);
     let members = [];
     let workerMessageHandler;
     yield new Promise((resolve) => {
@@ -107,17 +102,17 @@ function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
                 members = members.concat(message.data);
             }
 
+            if (message.metrics) {
+                metrics.data.members.parsed += message.metrics.count;
+                metrics.data.members.time.total += message.metrics.time.total;
+                metrics.data.members.time.min = metrics.data.members.time.min ? Math.min(metrics.data.members.time.min, message.metrics.time.min) : message.metrics.time.min;
+                metrics.data.members.time.max = Math.max(metrics.data.members.time.max, message.metrics.time.max);
+            }
+
             if (members.length === rows_count) {
                 console.log('All members are parsed. Sorting by name...');
-                members.sort((m1, m2) => {
-                    if (m1['Name'] < m2['Name']) {
-                        return -1;
-                    } else if (m1['Name'] === m2['Name']) {
-                        return 0;
-                    } else {
-                        return 1;
-                    }
-                });
+                let sortByName = utils.makeFnToSortBy('Name');
+                members.sort(sortByName);
                 console.log('Sort complete!');
                 resolve(members);
             }
@@ -129,10 +124,10 @@ function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
         cluster.on('message', workerMessageHandler);
         cluster.on('exit', workerExitHandler);
 
-        for (let i = 0; i < NUM_CPUs; i++) {
+        for (let i = 0; i < NUMBER_OF_WORKERS; i++) {
             let index_from = i * urls_per_worker;
             let index_to = 0;
-            if (i === NUM_CPUs - 1) {
+            if (i === NUMBER_OF_WORKERS - 1) {
                 index_to = rows_count;
             } else {
                 index_to = (i + 1) * urls_per_worker;
@@ -182,56 +177,7 @@ function parseColumnNames($) {
     return keys;
 }
 
-function writeToFile(file, data) {
-    console.log(`Opening ${file}`);
-    let fd = fs.openSync(file, 'a+');
-    console.log(`Writing data to ${file}`);
-    fs.writeSync(fd, data);
-    console.log(`Closing ${file}`);
-    fs.closeSync(fd);
-    console.log('Write to file - Done!');
-}
 
-function cleanFile(file) {
-    console.log(`Opening ${file}`);
-    let fd = fs.openSync(file, 'w+');
-    console.log(`Cleaning ${file}`);
-    fs.writeSync(fd, '');
-    console.log(`Closing ${file}`);
-    fs.closeSync(fd);
-    console.log('Cleaning file - Done!');
-}
-
-function getPerformanceResults() {
-    let results = {
-        pages: {},
-        members: {}
-    };
-
-    results.pages.count = PAGES_PARSED;
-    results.pages.total_time = PAGES_PARSE_TIMES.reduce(sum, 0);
-    results.pages.average_time = results.pages.total_time / results.pages.count;
-
-    results.members.count = MEMBERS_PARSED;
-    results.members.total_time = MEMBERS_PARSE_TIMES.reduce(sum, 0);
-    results.members.average_time = results.members.total_time / results.members.count;
-
-    return results;
-}
-
-function formatPerformanceResults(results) {
-    let text = '';
-    text += `Nr. of pages parsed: ${results.pages.count}\n`;
-    text += `Total time for parsing pages: ${results.pages.total_time}ms\n`;
-    text += `Average parse time per page: ${results.pages.average_time}ms\n`;
-    text += '\n';
-    text += `Nr. of members parsed: ${results.members.count}\n`;
-    text += `Total time for parsing members: ${results.members.total_time}ms\n`;
-    text += `Average parse time per member: ${results.members.average_time}ms\n`;
-
-    return text;
-}
-
-function sum(a, b) {
-    return a + b;
-}
+module.exports = {
+    scrape: scrape
+};

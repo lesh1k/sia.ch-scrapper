@@ -1,22 +1,23 @@
 {
-    "name": "members_scrapper",
-    "version": "1.0.0",
-    "description": "",
-    "main": "index.js",
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
-    },
-    "author": "Alexei Dvorac",
-    "license": "MIT",
-    "dependencies": {
-        "cheerio": "^0.20.0",
-        "co": "^4.6.0",
-        "phantom": "^2.1.9",
-        "webworker-threads": "^0.7.5"
-    },
-    "devDependencies": {
-        "node-fetch": "^1.5.3",
-        "pretty-print": "^1.1.0",
-        "stringify-object": "^2.4.0"
-    }
+  "name": "members_scrapper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Alexei Dvorac",
+  "license": "MIT",
+  "dependencies": {
+    "cheerio": "^0.20.0",
+    "cli-table": "^0.3.1",
+    "co": "^4.6.0",
+    "phantom": "^2.1.9",
+    "webworker-threads": "^0.7.5"
+  },
+  "devDependencies": {
+    "node-fetch": "^1.5.3",
+    "pretty-print": "^1.1.0",
+    "stringify-object": "^2.4.0"
+  }
 }

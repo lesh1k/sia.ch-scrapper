@@ -1,9 +1,11 @@
 {
     "root_url": "http://www.sia.ch",
+    "data_dir": "collected_data",
     "targets": [{
         "type": "honorary",
         "url": "http://www.sia.ch/en/membership/member-directory/honorary-members/"
-    }, {
+    }],
+    "skipped_targets": [{
         "type": "individual",
         "url": "http://www.sia.ch/en/membership/member-directory/individual-members/"
     }, {

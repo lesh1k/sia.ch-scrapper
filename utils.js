@@ -1,13 +1,8 @@
-module.exports = {
-    blockResourceLoading: blockResourceLoading,
-    getPerformanceResults: getPerformanceResults,
-    formatPerformanceResults: formatPerformanceResults,
-    fetchPage: fetchPage,
-    initPhantomInstance: initPhantomInstance
-};
-
+/* eslint no-console: 0 */
+'use strict';
 
 const phantom = require('phantom');
+const fs = require('fs');
 
 function* blockResourceLoading(page) {
     yield page.property('onResourceRequested', function(requestData, request) {
@@ -28,40 +23,6 @@ function* blockResourceLoading(page) {
             console.log('[RESOURCE ALLOWED]', requestData.url);
         }
     });
-}
-
-function getPerformanceResults() {
-    let results = {
-        pages: {},
-        members: {}
-    };
-
-    results.pages.count = PAGES_PARSED;
-    results.pages.total_time = PAGES_PARSE_TIMES.reduce(sum, 0);
-    results.pages.average_time = results.pages.total_time / results.pages.count;
-
-    results.members.count = MEMBERS_PARSED;
-    results.members.total_time = MEMBERS_PARSE_TIMES.reduce(sum, 0);
-    results.members.average_time = results.members.total_time / results.members.count;
-
-    return results;
-}
-
-function formatPerformanceResults(results) {
-    let text = '';
-    text += `Nr. of pages parsed: ${results.pages.count}\n`;
-    text += `Total time for parsing pages: ${results.pages.total_time}ms\n`;
-    text += `Average parse time per page: ${results.pages.average_time}ms\n`;
-    text += '\n';
-    text += `Nr. of members parsed: ${results.members.count}\n`;
-    text += `Total time for parsing members: ${results.members.total_time}ms\n`;
-    text += `Average parse time per member: ${results.members.average_time}ms\n`;
-
-    return text;
-}
-
-function sum(a, b) {
-    return a + b;
 }
 
 function* fetchPage(url, instance) {
@@ -96,3 +57,45 @@ function* initPhantomInstance() {
     console.log('Storing phantom instance.');
     return yield phantom.create();
 }
+
+function writeToFile(file, data) {
+    console.log(`Opening ${file}`);
+    let fd = fs.openSync(file, 'a+');
+    console.log(`Writing data to ${file}`);
+    fs.writeSync(fd, data);
+    console.log(`Closing ${file}`);
+    fs.closeSync(fd);
+    console.log('Write to file - Done!');
+}
+
+function cleanFile(file) {
+    console.log(`Opening ${file}`);
+    let fd = fs.openSync(file, 'w+');
+    console.log(`Cleaning ${file}`);
+    fs.writeSync(fd, '');
+    console.log(`Closing ${file}`);
+    fs.closeSync(fd);
+    console.log('Cleaning file - Done!');
+}
+
+function makeFnToSortBy(property_name) {
+    return function (obj1, obj2) {
+        if (obj1[property_name] < obj2[property_name]) {
+            return -1;
+        } else if (obj1[property_name] === obj2[property_name]) {
+            return 0;
+        } else {
+            return 1;
+        }
+    };
+}
+
+
+module.exports = {
+    blockResourceLoading: blockResourceLoading,
+    fetchPage: fetchPage,
+    initPhantomInstance: initPhantomInstance,
+    writeToFile: writeToFile,
+    cleanFile: cleanFile,
+    makeFnToSortBy: makeFnToSortBy
+};

@@ -8,26 +8,10 @@ const co = require('co');
 
 const timer = require('./timer');
 const utils = require('./utils');
+const helpers = require('./helpers');
 const CONFIG = require('./config.json');
+const MEMBERS_PARSE_TIMES = [];
 
-
-let PAGES_PARSED = 0;
-let PAGES_PARSE_TIMES = [];
-let MEMBERS_PARSED = 0;
-let MEMBERS_PARSE_TIMES = [];
-let TOTAL_ENTRIES = 0;
-
-
-module.exports = workerWork;
-
-/**************************************************************/
-function getMemberRows(html, index_from, index_to) {
-    timer(`PAGE[${PAGES_PARSED}]`).start();
-    let $ = cheerio.load(html);
-    let $rows = $('.table-list-directory tr').not('.table-list-header');
-
-    return $rows.slice(index_from, index_to);
-}
 
 function workerWork() {
     process.send({
@@ -51,7 +35,6 @@ function workerWork() {
         msg: `Begin scraping members (from ${index_from} to ${index_to}).`
     });
 
-    TOTAL_ENTRIES = index_to - index_from;
     co(function*() {
             let $rows = getMemberRows(html, index_from, index_to);
             keys = keys.split(',');
@@ -60,34 +43,47 @@ function workerWork() {
         .then(members => {
             process.send({
                 msg: 'Done!',
-                data: members
+                data: members,
+                metrics: {
+                    count: members.length,
+                    time: {
+                        list: MEMBERS_PARSE_TIMES,
+                        total: MEMBERS_PARSE_TIMES.reduce(helpers.sum),
+                        min: Math.min.apply(null, MEMBERS_PARSE_TIMES),
+                        max: Math.max.apply(null, MEMBERS_PARSE_TIMES)
+                    }
+                }
             });
             process.disconnect();
         });
 }
 
-function* scrapeMembers($rows, keys) {
-    try {
-        let members = [];
-        let instance = yield * utils.initPhantomInstance();
-        for (let i = 0; i < $rows.length; i++) {
-            timer(`MEMBER[${MEMBERS_PARSED}]`).start();
-            console.log(`Member ${MEMBERS_PARSED + 1} of ${TOTAL_ENTRIES}`);
-            let member = yield * scrapeMemberData($rows.eq(i), keys, instance);
-            members.push(member);
-            timer(`MEMBER[${MEMBERS_PARSED}]`).stop();
-            timer(`MEMBER[${MEMBERS_PARSED}]`).result(time => {
-                console.log(`Member parsed in ${time}ms\n\n`);
-                MEMBERS_PARSE_TIMES.push(time);
-            });
-            MEMBERS_PARSED++;
-        }
+function getMemberRows(html, index_from, index_to) {
+    let $ = cheerio.load(html);
+    let $rows = $('.table-list-directory tr').not('.table-list-header');
 
-        instance.exit();
-        return members;
-    } catch (e) {
-        console.error(e);
+    return $rows.slice(index_from, index_to);
+}
+
+
+function* scrapeMembers($rows, keys) {
+    let members = [];
+    const members_to_parse_count = $rows.length;
+    let instance = yield * utils.initPhantomInstance();
+    for (let i = 0; i < $rows.length; i++) {
+        timer('MEMBER').start();
+        console.log(`Member ${members.length} of ${members_to_parse_count}`);
+        let member = yield * scrapeMemberData($rows.eq(i), keys, instance);
+        members.push(member);
+        timer('MEMBER').stop();
+        timer('MEMBER').result(time => {
+            console.log(`Member parsed in ${time}ms\n\n`);
+            MEMBERS_PARSE_TIMES.push(time);
+        });
     }
+
+    instance.exit();
+    return members;
 }
 
 function* scrapeMemberData($row, keys, instance) {
@@ -162,3 +158,6 @@ function parseDetailedMemberData(html) {
 
     return details;
 }
+
+
+module.exports = workerWork;

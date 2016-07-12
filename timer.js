@@ -1,3 +1,5 @@
+'use strict';
+
 module.exports = (function createTimer() {
     const timers = {};
     return function(name) {
