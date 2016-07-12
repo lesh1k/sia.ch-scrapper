@@ -3,49 +3,35 @@
 const Table = require('cli-table');
 
 
+const makeMetric = function() {
+    const template_metric = {
+        time: {
+            __entries_count: 0,
+            total: 0,
+            min: 0,
+            max: 0,
+            get avg() {
+                let avg = this.total / this.__entries_count;
+                return avg.toFixed(2);
+            }
+        },
+        get total() {
+            return this.__total;
+        },
+        set total(val) {
+            this.__total = val;
+            this.time.__entries_count = val;
+        },
+        __total: 0,
+        parsed: 0,
+    };
+
+    return Object.create(template_metric);
+};
+
 const METRICS = {
-    pages: {
-        __total: 0,
-        set total(val) {
-            this.__total = val;
-            this.time.__total_count = val;
-        },
-        get total() {
-            return this.__total;
-        },
-        parsed: 0,
-        time: {
-            __total_count: 0,
-            total: 0,
-            min: 0,
-            max: 0,
-            get avg() {
-                let avg = this.total / this.__total_count;
-                return avg.toFixed(2);
-            }
-        }
-    },
-    members: {
-        __total: 0,
-        set total(val) {
-            this.__total = val;
-            this.time.__total_count = val;
-        },
-        get total() {
-            return this.__total;
-        },
-        parsed: 0,
-        time: {
-            __total_count: 0,
-            total: 0,
-            min: 0,
-            max: 0,
-            get avg() {
-                let avg = this.total / this.__total_count;
-                return avg.toFixed(2);
-            }
-        }
-    }
+    pages: makeMetric(),
+    members: makeMetric()
 };
 
 function formatPerformanceResults(results, unit) {
