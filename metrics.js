@@ -1,35 +1,43 @@
+/* eslint no-console: 0 */
 'use strict';
 
 const Table = require('cli-table');
 
+const helpers = require('./helpers');
+const utils = require('./utils');
+
 
 const makeMetric = function() {
-    const template_metric = {
-        time: {
-            __entries_count: 0,
-            total: 0,
-            min: 0,
-            max: 0,
-            get avg() {
-                let avg = this.total / this.__entries_count;
-                return avg.toFixed(2);
-            }
-        },
+    let entries_count = 0;
+
+    const time = {
+        total: 0,
+        min: 0,
+        max: 0,
+        get avg() {
+            let avg = this.total / entries_count;
+            return avg.toFixed(2);
+        }
+    };
+
+    const metric = {
+        time: time,
         get total() {
-            return this.__total;
+            return entries_count;
         },
         set total(val) {
-            this.__total = val;
-            this.time.__entries_count = val;
+            entries_count = val;
         },
-        __total: 0,
         parsed: 0,
     };
 
-    return Object.create(template_metric);
+    return metric;
 };
 
 const METRICS = {
+    created_on: new Date(),
+    number_of_CPUs: 0,
+    number_of_workers: 0,
     pages: makeMetric(),
     members: makeMetric()
 };
@@ -54,8 +62,34 @@ function formatPerformanceResults(results, unit) {
     return text;
 }
 
+function logResults() {
+    console.log('Done!\n\n');
+    console.log(helpers.title('Performance analysis'));
+    let formatted_results = this.formatPerformanceResults(this.data.pages, 'PAGE(s)');
+    formatted_results += this.formatPerformanceResults(this.data.members, 'MEMBER(s)');
+    console.log(formatted_results);
+}
+
+function storeResults(file) {
+    console.log('Saving metrics to', file);
+    let metrics_list = [];
+    try {
+        let existing_data = require(file);
+        metrics_list = existing_data;
+    } catch(e) {
+        console.error(e);
+    }
+
+    metrics_list.push(this.data);
+    utils.cleanFile(file);
+    utils.writeToFile(file, JSON.stringify(metrics_list));
+    console.log('Done!');
+}
+
 
 module.exports = {
     data: METRICS,
-    formatPerformanceResults: formatPerformanceResults
+    formatPerformanceResults: formatPerformanceResults,
+    logResults: logResults,
+    storeResults: storeResults
 };
