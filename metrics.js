@@ -4,7 +4,6 @@
 const Table = require('cli-table');
 
 const helpers = require('./helpers');
-const utils = require('./utils');
 
 
 const makeMetric = function() {
@@ -81,8 +80,8 @@ function storeResults(file) {
     }
 
     metrics_list.push(this.data);
-    utils.cleanFile(file);
-    utils.writeToFile(file, JSON.stringify(metrics_list));
+    helpers.cleanFile(file);
+    helpers.writeToFile(file, JSON.stringify(metrics_list));
     console.log('Done!');
 }
 

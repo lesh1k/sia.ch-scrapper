@@ -7,7 +7,7 @@ const cheerio = require('cheerio');
 const co = require('co');
 
 const timer = require('./timer');
-const utils = require('./utils');
+const ph = require('./phantom_helpers');
 const helpers = require('./helpers');
 const CONFIG = require('./config.json');
 const MEMBERS_PARSE_TIMES = [];
@@ -69,7 +69,7 @@ function getMemberRows(html, index_from, index_to) {
 function* scrapeMembers($rows, keys) {
     let members = [];
     const members_to_parse_count = $rows.length;
-    let instance = yield * utils.initPhantomInstance();
+    let instance = yield * ph.initPhantomInstance();
     for (let i = 0; i < $rows.length; i++) {
         timer('MEMBER').start();
         console.log(`Member ${members.length} of ${members_to_parse_count}`);
@@ -96,7 +96,7 @@ function* scrapeMemberData($row, keys, instance) {
     let url = getMemberUrl($row);
 
     console.log('Open member page');
-    let html = yield * utils.fetchPage(url, instance);
+    let html = yield * ph.fetchPage(url, instance);
     console.log('Parsing detailed member data');
     member.details = parseDetailedMemberData(html);
 

@@ -11,7 +11,8 @@ let NUMBER_OF_WORKERS = NUM_CPUs;
 
 const CONFIG = require('./config.json');
 const timer = require('./timer');
-const utils = require('./utils');
+const helpers = require('./helpers');
+const ph = require('./phantom_helpers');
 const metrics = require('./metrics');
 const ROOT_DIR = __dirname;
 
@@ -33,7 +34,7 @@ function* scrape(url, member_type) {
 
 function* scrapePage(url, member_type) {
     timer('PAGE').start();
-    let html = yield * utils.fetchPage(url);
+    let html = yield * ph.fetchPage(url);
     let $ = cheerio.load(html);
 
     const members = yield * parseMembersData(html);
@@ -63,7 +64,7 @@ function* parseMembersData(html, member_type) {
     let $rows = $('.table-list-directory tr').not('.table-list-header');
     if (isNewTarget()) {
         let file = path.join(ROOT_DIR, CONFIG.data_dir, `${member_type}_members.json`);
-        utils.cleanFile(file);
+        helpers.cleanFile(file);
 
         let total_entries = $(CONFIG.entries_count_selector).text().match(/\d+'?\d+/);
         metrics.data.members.total += parseInt(total_entries.toString().replace('\'', ''), 10);
@@ -91,7 +92,7 @@ function store(data, filename_prefix, more_to_come) {
     }
 
     let file = path.join(ROOT_DIR, CONFIG.data_dir, `${filename_prefix}_members.json`);
-    utils.writeToFile(file, json);
+    helpers.writeToFile(file, json);
 }
 
 function getNextPageUrl($) {
@@ -125,7 +126,7 @@ function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
 
             if (members.length === rows_count) {
                 console.log('All members are parsed. Sorting by name...');
-                let sortByName = utils.makeFnToSortBy('Name');
+                let sortByName = helpers.makeFnToSortBy('Name');
                 members.sort(sortByName);
                 console.log('Sort complete!');
                 resolve(members);
