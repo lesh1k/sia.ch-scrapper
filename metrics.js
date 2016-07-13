@@ -62,7 +62,6 @@ function formatPerformanceResults(results, unit) {
 }
 
 function logResults() {
-    console.log('Done!\n\n');
     console.log(helpers.title('Performance analysis'));
     let formatted_results = this.formatPerformanceResults(this.data.pages, 'PAGE(s)');
     formatted_results += this.formatPerformanceResults(this.data.members, 'MEMBER(s)');
@@ -70,7 +69,6 @@ function logResults() {
 }
 
 function storeResults(file) {
-    console.log('Saving metrics to', file);
     let metrics_list = [];
     try {
         let existing_data = require(file);
@@ -82,7 +80,6 @@ function storeResults(file) {
     metrics_list.push(this.data);
     helpers.cleanFile(file);
     helpers.writeToFile(file, JSON.stringify(metrics_list));
-    console.log('Done!');
 }
 
 

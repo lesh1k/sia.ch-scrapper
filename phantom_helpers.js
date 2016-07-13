@@ -17,10 +17,7 @@ function* blockResourceLoading(page) {
         });
 
         if (is_blacklisted_resource) {
-            // console.log('BLOCKED: ', requestData['url']);
             request.abort();
-        } else {
-            console.log('[RESOURCE ALLOWED]', requestData.url);
         }
     });
 }
@@ -32,29 +29,19 @@ function* fetchPage(url, instance) {
         is_local_instance = true;
     }
 
-    console.log('Phantom createPage');
     const page = yield instance.createPage();
-    console.log('Setup selective resource blocking');
     yield * blockResourceLoading(page);
 
-    console.log('Opening URL', url);
-    let status = yield page.open(url);
-    console.log('URL opened. Status: ', status);
-    console.log('Getting page content');
+    yield page.open(url);
     let html = yield page.property('content');
-    console.log('Closing page');
     yield page.close();
-    console.log('Page closed');
     if (is_local_instance) {
         instance.exit();
-        console.log('Phantom instance exited.');
     }
     return html;
 }
 
 function* initPhantomInstance() {
-    console.log('Initiate phantom');
-    console.log('Storing phantom instance.');
     return yield phantom.create();
 }
 

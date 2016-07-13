@@ -44,7 +44,6 @@ function* scrapePage(url, member_type) {
 
     timer('PAGE').stop();
     timer('PAGE').result(time => {
-        console.log(`Page parsed in ${time}ms\n\n`);
         metrics.data.pages.time.total += time;
         metrics.data.pages.time.min = metrics.data.pages.time.min ? Math.min(metrics.data.pages.time.min, time) : time;
         metrics.data.pages.time.max = Math.max(metrics.data.pages.time.max, time);
@@ -113,19 +112,11 @@ function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
     let clusterWorkerMessageHandler;
     yield new Promise((resolve) => {
         clusterWorkerMessageHandler = makeClusterWorkerMessageHandler(members, rows_count, resolve);
-
-        cluster.on('online', clusterWorkerOnlineHandler);
         cluster.on('message', clusterWorkerMessageHandler);
-        cluster.on('exit', clusterWorkerExitHandler);
-
         spawnWorkers(NUMBER_OF_WORKERS, rows_count, keys, member_type, html);
     });
 
-    console.log('Removing event listeners from clusters.');
-    cluster.removeListener('online', clusterWorkerOnlineHandler);
     cluster.removeListener('message', clusterWorkerMessageHandler);
-    cluster.removeListener('exit', clusterWorkerExitHandler);
-
     return members;
 }
 
@@ -133,7 +124,6 @@ function makeClusterWorkerMessageHandler(members, rows_count, resolve) {
 
     return function clusterWorkerMessageHandler(worker, message) {
         if (message.data) {
-            console.log(`[WORKER (ID=${worker.id})] has processed the URLs`);
             Array.prototype.push.apply(members, message.data);
         }
 
@@ -149,29 +139,13 @@ function makeClusterWorkerMessageHandler(members, rows_count, resolve) {
         }
 
         if (members.length === rows_count) {
-            console.log('All members are parsed. Sorting by name...');
             let sortByName = helpers.makeFnToSortBy('Name');
             members.sort(sortByName);
-            console.log('Sort complete!');
             resolve(members);
         }
 
-        console.log(`[WORKER (ID=${worker.id})] said`, message.msg);
+        console.log(`[WORKER #${worker.id}] said:`, message.msg);
     };
-}
-
-function clusterWorkerOnlineHandler(worker) {
-    console.log(`Worker (ID=${worker.id}) is ONLINE`);
-}
-
-function clusterWorkerExitHandler(worker, code, signal) {
-    if (signal) {
-        console.log(`[WORKER (ID=${worker.id})] was killed by signal: ${signal}`);
-    } else if (code !== 0) {
-        console.log(`[WORKER (ID=${worker.id})] exited with error code: ${code}`);
-    } else {
-        console.log(`[WORKER (ID=${worker.id})] exited with success!`);
-    }
 }
 
 function spawnWorkers(workers_count, rows_count, keys, member_type, html) {
@@ -196,7 +170,6 @@ function spawnWorkers(workers_count, rows_count, keys, member_type, html) {
 }
 
 function parseColumnNames($) {
-    console.log('Parsing column names');
     const keys = [];
     const $thead = $('.table-list-directory .table-list-header');
 

@@ -14,14 +14,6 @@ const MEMBERS_PARSE_TIMES = [];
 
 
 function workerWork() {
-    process.send({
-        msg: 'Worker alive!'
-    });
-
-    process.send({
-        msg: 'Prepare arguments.'
-    });
-
     let index_from, index_to, keys, member_type, html;
     ({
         index_from,
@@ -32,7 +24,7 @@ function workerWork() {
     } = process.env);
 
     process.send({
-        msg: `Begin scraping members (from ${index_from} to ${index_to}).`
+        msg: `Scraping members (from ${index_from} to ${index_to}).`
     });
 
     co(function*() {
@@ -72,13 +64,14 @@ function* scrapeMembers($rows, keys) {
     let instance = yield * ph.initPhantomInstance();
     for (let i = 0; i < $rows.length; i++) {
         timer('MEMBER').start();
-        console.log(`Member ${members.length} of ${members_to_parse_count}`);
         let member = yield * scrapeMemberData($rows.eq(i), keys, instance);
         members.push(member);
         timer('MEMBER').stop();
         timer('MEMBER').result(time => {
-            console.log(`Member parsed in ${time}ms\n\n`);
             MEMBERS_PARSE_TIMES.push(time);
+            process.send({
+                msg: `Member ${members.length} of ${members_to_parse_count} (${time}ms)`
+            });
         });
     }
 
@@ -88,16 +81,10 @@ function* scrapeMembers($rows, keys) {
 
 function* scrapeMemberData($row, keys, instance) {
     let member = {};
-
-    console.log('Parsing general member data');
     member = parseGeneralMemberData($row, keys);
 
-    console.log('Get URL to member page');
     let url = getMemberUrl($row);
-
-    console.log('Open member page');
     let html = yield * ph.fetchPage(url, instance);
-    console.log('Parsing detailed member data');
     member.details = parseDetailedMemberData(html);
 
     return member;

@@ -23,23 +23,15 @@ function title(text) {
 }
 
 function writeToFile(file, data) {
-    console.log(`Opening ${file}`);
     let fd = fs.openSync(file, 'a+');
-    console.log(`Writing data to ${file}`);
     fs.writeSync(fd, data);
-    console.log(`Closing ${file}`);
     fs.closeSync(fd);
-    console.log('Write to file - Done!');
 }
 
 function cleanFile(file) {
-    console.log(`Opening ${file}`);
     let fd = fs.openSync(file, 'w+');
-    console.log(`Cleaning ${file}`);
     fs.writeSync(fd, '');
-    console.log(`Closing ${file}`);
     fs.closeSync(fd);
-    console.log('Cleaning file - Done!');
 }
 
 function makeFnToSortBy(property_name) {
