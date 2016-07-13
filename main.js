@@ -16,7 +16,7 @@ if (cluster.isMaster) {
     co(function*() {
         for (let i = 0; i < targets.length; i++) {
             let target = targets[i];
-            yield * scrapper.scrape(target.url, target.type);
+            yield * scrapper.scrape(target.url, target.type, metrics);
         }
 
         if (config.metrics.log_to_console) {

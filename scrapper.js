@@ -13,15 +13,16 @@ const CONFIG = require('./config.json');
 const timer = require('./timer');
 const helpers = require('./helpers');
 const ph = require('./phantom_helpers');
-const metrics = require('./metrics');
 const ROOT_DIR = __dirname;
+let metrics;
 
 if (!Number.isNaN(parseInt(CONFIG.number_of_workers))) {
     NUMBER_OF_WORKERS = parseInt(CONFIG.number_of_workers);
 }
 
 
-function* scrape(url, member_type) {
+function* scrape(url, member_type, app_metrics) {
+    metrics = app_metrics;
     metrics.data.number_of_workers = NUMBER_OF_WORKERS;
     metrics.data.number_of_CPUs = NUM_CPUs;
     console.log(`Begin scraping ${member_type} members.`);
@@ -37,7 +38,8 @@ function* scrapePage(url, member_type) {
     let html = yield * ph.fetchPage(url);
     let $ = cheerio.load(html);
 
-    const members = yield * parseMembersData(html);
+    const members = yield * parseMembersData(html, member_type);
+    metrics.data.pages.parsed++;
     store(members, member_type, nextPageExists($));
 
     timer('PAGE').stop();
@@ -47,7 +49,6 @@ function* scrapePage(url, member_type) {
         metrics.data.pages.time.min = metrics.data.pages.time.min ? Math.min(metrics.data.pages.time.min, time) : time;
         metrics.data.pages.time.max = Math.max(metrics.data.pages.time.max, time);
     });
-    metrics.data.pages.parsed++;
 
     return getNextPageUrl($);
 }
@@ -133,13 +134,17 @@ function makeClusterWorkerMessageHandler(members, rows_count, resolve) {
     return function clusterWorkerMessageHandler(worker, message) {
         if (message.data) {
             console.log(`[WORKER (ID=${worker.id})] has processed the URLs`);
-            members = members.concat(message.data);
+            Array.prototype.push.apply(members, message.data);
         }
 
         if (message.metrics) {
             metrics.data.members.parsed += message.metrics.count;
             metrics.data.members.time.total += message.metrics.time.total;
-            metrics.data.members.time.min = metrics.data.members.time.min ? Math.min(metrics.data.members.time.min, message.metrics.time.min) : message.metrics.time.min;
+            if (metrics.data.members.time.min === 0) {
+                metrics.data.members.time.min = message.metrics.time.min;
+            } else {
+                metrics.data.members.time.min = Math.min(metrics.data.members.time.min, message.metrics.time.min);
+            }
             metrics.data.members.time.max = Math.max(metrics.data.members.time.max, message.metrics.time.max);
         }
 
