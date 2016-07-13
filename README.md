@@ -1,4 +1,4 @@
-##NodeJS scrapper. Collects members' data from sia.ch  
+##NodeJS scrapper. Collects members' data from [sia.ch  ](sia.ch)
 
 Experimental scrapper in NodeJS. Uses phantomJS and cheerio to process and parse web
 content.
