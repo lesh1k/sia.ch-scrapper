@@ -111,29 +111,7 @@ function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
     let members = [];
     let clusterWorkerMessageHandler;
     yield new Promise((resolve) => {
-        clusterWorkerMessageHandler = function clusterWorkerMessageHandler(worker, message) {
-            if (message.data) {
-                console.log(`[WORKER (ID=${worker.id})] has processed the URLs`);
-                members = members.concat(message.data);
-            }
-
-            if (message.metrics) {
-                metrics.data.members.parsed += message.metrics.count;
-                metrics.data.members.time.total += message.metrics.time.total;
-                metrics.data.members.time.min = metrics.data.members.time.min ? Math.min(metrics.data.members.time.min, message.metrics.time.min) : message.metrics.time.min;
-                metrics.data.members.time.max = Math.max(metrics.data.members.time.max, message.metrics.time.max);
-            }
-
-            if (members.length === rows_count) {
-                console.log('All members are parsed. Sorting by name...');
-                let sortByName = helpers.makeFnToSortBy('Name');
-                members.sort(sortByName);
-                console.log('Sort complete!');
-                resolve(members);
-            }
-
-            console.log(`[WORKER (ID=${worker.id})] said`, message.msg);
-        };
+        clusterWorkerMessageHandler = makeClusterWorkerMessageHandler(members, rows_count, resolve);
 
         cluster.on('online', clusterWorkerOnlineHandler);
         cluster.on('message', clusterWorkerMessageHandler);
@@ -148,6 +126,33 @@ function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {
     cluster.removeListener('exit', clusterWorkerExitHandler);
 
     return members;
+}
+
+function makeClusterWorkerMessageHandler(members, rows_count, resolve) {
+
+    return function clusterWorkerMessageHandler(worker, message) {
+        if (message.data) {
+            console.log(`[WORKER (ID=${worker.id})] has processed the URLs`);
+            members = members.concat(message.data);
+        }
+
+        if (message.metrics) {
+            metrics.data.members.parsed += message.metrics.count;
+            metrics.data.members.time.total += message.metrics.time.total;
+            metrics.data.members.time.min = metrics.data.members.time.min ? Math.min(metrics.data.members.time.min, message.metrics.time.min) : message.metrics.time.min;
+            metrics.data.members.time.max = Math.max(metrics.data.members.time.max, message.metrics.time.max);
+        }
+
+        if (members.length === rows_count) {
+            console.log('All members are parsed. Sorting by name...');
+            let sortByName = helpers.makeFnToSortBy('Name');
+            members.sort(sortByName);
+            console.log('Sort complete!');
+            resolve(members);
+        }
+
+        console.log(`[WORKER (ID=${worker.id})] said`, message.msg);
+    };
 }
 
 function clusterWorkerOnlineHandler(worker) {
