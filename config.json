@@ -22,5 +22,6 @@
         "filename": "metrics.json",
         "store": true,
         "log_to_console": true
-    }
+    },
+    "number_of_workers": "default"
 }

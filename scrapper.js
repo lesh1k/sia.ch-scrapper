@@ -7,13 +7,17 @@ const cheerio = require('cheerio');
 const path = require('path');
 const cluster = require('cluster');
 const NUM_CPUs = require('os').cpus().length;
+let NUMBER_OF_WORKERS = NUM_CPUs;
 
-const NUMBER_OF_WORKERS = 2 * NUM_CPUs;
 const CONFIG = require('./config.json');
 const timer = require('./timer');
 const utils = require('./utils');
 const metrics = require('./metrics');
 const ROOT_DIR = __dirname;
+
+if (!Number.isNaN(parseInt(CONFIG.number_of_workers))) {
+    NUMBER_OF_WORKERS = parseInt(CONFIG.number_of_workers);
+}
 
 
 function* scrape(url, member_type) {
