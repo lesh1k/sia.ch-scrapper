@@ -4,9 +4,6 @@
     "targets": [{
         "type": "honorary",
         "url": "http://www.sia.ch/en/membership/member-directory/honorary-members/"
-    },{
-        "type": "honorary2",
-        "url": "http://www.sia.ch/en/membership/member-directory/honorary-members/"
     }],
     "skipped_targets": [{
         "type": "individual",

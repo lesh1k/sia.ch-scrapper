@@ -20,8 +20,6 @@ function* scrape(url, member_type) {
     metrics.data.number_of_workers = NUMBER_OF_WORKERS;
     metrics.data.number_of_CPUs = NUM_CPUs;
     console.log(`Begin scraping ${member_type} members.`);
-    let file = path.join(ROOT_DIR, CONFIG.data_dir, `${member_type}_members.json`);
-    utils.cleanFile(file);
     while (url) {
         url = yield * scrapePage(url, member_type);
     }
@@ -34,41 +32,8 @@ function* scrapePage(url, member_type) {
     let html = yield * utils.fetchPage(url);
     let $ = cheerio.load(html);
 
-    if ($(CONFIG.current_entries_selector).length) {
-        console.log(`Parsing entries ${$(CONFIG.current_entries_selector).text()}`);
-    }
-    console.log('\n\n');
-
-    let next_page = $('.nextLinkWrap a').length > 0;
-    if (next_page) {
-        url = CONFIG.root_url + $('.nextLinkWrap a').first().attr('href');
-    } else {
-        url = null;
-    }
-
-    const keys = parseColumnNames($);
-    let $rows = $('.table-list-directory tr').not('.table-list-header');
-    let is_new_target = metrics.data.pages.parsed >= metrics.data.pages.total;
-    if (is_new_target) {
-        let total_entries = $(CONFIG.entries_count_selector).text().match(/\d+'?\d+/);
-        metrics.data.members.total += parseInt(total_entries.toString().replace('\'', ''), 10);
-        metrics.data.pages.total += Math.ceil(total_entries / $rows.length);
-        console.log(`Number of entries: ${total_entries.toString()}`);
-    }
-
-    let members = yield * delegateProcessingToWorkers(html, $rows.length, keys, member_type);
-    let json = JSON.stringify(members);
-    if (!is_new_target) {
-        json = json.replace('[', ',');
-    }
-
-    if (next_page) {
-        let index_of_array_closing_brace = json.lastIndexOf(']');
-        json = json.substr(0, index_of_array_closing_brace);
-    }
-    let file = path.join(ROOT_DIR, CONFIG.data_dir, `${member_type}_members.json`);
-    utils.writeToFile(file, json);
-
+    const members = yield * parseMembersData(html);
+    store(members, member_type, nextPageExists($));
 
     timer('PAGE').stop();
     timer('PAGE').result(time => {
@@ -79,7 +44,62 @@ function* scrapePage(url, member_type) {
     });
     metrics.data.pages.parsed++;
 
-    return url;
+    return getNextPageUrl($);
+}
+
+function* parseMembersData(html, member_type) {
+    let $ = cheerio.load(html);
+
+    if ($(CONFIG.current_entries_selector).length) {
+        console.log(`Parsing entries ${$(CONFIG.current_entries_selector).text()}`);
+    }
+
+    console.log('\n\n');
+    const keys = parseColumnNames($);
+    let $rows = $('.table-list-directory tr').not('.table-list-header');
+    if (isNewTarget()) {
+        let file = path.join(ROOT_DIR, CONFIG.data_dir, `${member_type}_members.json`);
+        utils.cleanFile(file);
+
+        let total_entries = $(CONFIG.entries_count_selector).text().match(/\d+'?\d+/);
+        metrics.data.members.total += parseInt(total_entries.toString().replace('\'', ''), 10);
+        metrics.data.pages.total += Math.ceil(total_entries / $rows.length);
+        console.log(`Number of entries: ${total_entries.toString()}`);
+    }
+
+    let members = yield * delegateProcessingToWorkers(html, $rows.length, keys, member_type);
+    return members;
+}
+
+function isNewTarget() {
+    return metrics.data.pages.parsed >= metrics.data.pages.total;
+}
+
+function store(data, filename_prefix, more_to_come) {
+    let json = JSON.stringify(data);
+    if (!isNewTarget()) {
+        json = json.replace('[', ',');
+    }
+
+    if (more_to_come) {
+        let index_of_array_closing_brace = json.lastIndexOf(']');
+        json = json.substr(0, index_of_array_closing_brace);
+    }
+
+    let file = path.join(ROOT_DIR, CONFIG.data_dir, `${filename_prefix}_members.json`);
+    utils.writeToFile(file, json);
+}
+
+function getNextPageUrl($) {
+    if (nextPageExists($)) {
+        return CONFIG.root_url + $('.nextLinkWrap a').first().attr('href');
+    }
+
+    return null;
+}
+
+function nextPageExists($) {
+    return $('.nextLinkWrap a').length > 0;
 }
 
 function* delegateProcessingToWorkers(html, rows_count, keys, member_type) {

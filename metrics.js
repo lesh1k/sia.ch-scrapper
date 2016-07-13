@@ -77,7 +77,7 @@ function storeResults(file) {
         let existing_data = require(file);
         metrics_list = existing_data;
     } catch(e) {
-        console.error(e);
+        console.log(`${file} either empty or does not exist`);
     }
 
     metrics_list.push(this.data);
