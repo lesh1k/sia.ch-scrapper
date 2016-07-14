@@ -56,10 +56,9 @@ function* parseMembersData(html, member_type) {
     let $ = cheerio.load(html);
 
     if ($(CONFIG.current_entries_selector).length) {
-        console.log(`Parsing entries ${$(CONFIG.current_entries_selector).text()}`);
+        console.log(`\n\nParsing entries ${$(CONFIG.current_entries_selector).text()}`);
     }
 
-    console.log('\n\n');
     const keys = parseColumnNames($);
     let $rows = $('.table-list-directory tr').not('.table-list-header');
     if (isNewTarget()) {

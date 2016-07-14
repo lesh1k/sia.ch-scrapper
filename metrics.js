@@ -8,13 +8,14 @@ const helpers = require('./helpers');
 
 const makeMetric = function() {
     let entries_count = 0;
+    let parsed_entries_count = 0;
 
     const time = {
         total: 0,
         min: 0,
         max: 0,
         get avg() {
-            let avg = this.total / entries_count;
+            let avg = this.total / parsed_entries_count;
             return avg.toFixed(2);
         }
     };
@@ -27,7 +28,12 @@ const makeMetric = function() {
         set total(val) {
             entries_count = val;
         },
-        parsed: 0,
+        get parsed() {
+            return parsed_entries_count;
+        },
+        set parsed(val) {
+            parsed_entries_count = val;
+        }
     };
 
     return metric;
